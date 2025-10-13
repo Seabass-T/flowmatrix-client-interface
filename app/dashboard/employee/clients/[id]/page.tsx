@@ -40,42 +40,29 @@ interface PageProps {
 export default async function EmployeeClientViewPage({ params }: PageProps) {
   const { id: clientId } = await params
 
-  console.log('🔍 [Employee Client View] Loading page for client:', clientId)
-
   // 1. Auth check with regular client
   const supabase = await createClient()
   const {
     data: { user },
-    error: authError,
   } = await supabase.auth.getUser()
 
-  console.log('🔐 [Employee Client View] Auth check:', {
-    hasUser: !!user,
-    userId: user?.id,
-    authError: authError?.message,
-  })
-
   if (!user) {
-    console.error('❌ [Employee Client View] No authenticated user - redirecting to login')
     redirect('/login')
   }
 
-  // 2. Verify user is employee (using same method as middleware)
-  const userRole = user.user_metadata?.role as 'client' | 'employee' | undefined
+  // 2. Use ADMIN CLIENT for ALL data queries (bypasses RLS)
+  const supabaseAdmin = createAdminClient()
 
-  console.log('👤 [Employee Client View] User role check:', {
-    role: userRole,
-    userId: user.id,
-    email: user.email,
-  })
+  // Verify user is employee
+  const { data: userData } = (await supabaseAdmin
+    .from('users')
+    .select('email, role')
+    .eq('id', user.id)
+    .single()) as { data: { email: string; role: 'client' | 'employee' } | null }
 
-  if (!userRole || userRole !== 'employee') {
-    console.error('❌ [Employee Client View] User is not employee - redirecting to client dashboard. Role:', userRole)
+  if (!userData || userData.role !== 'employee') {
     redirect('/dashboard/client')
   }
-
-  // 3. Use ADMIN CLIENT for data queries
-  const supabaseAdmin = createAdminClient()
 
   // 4. Fetch client data with projects
   const { data: client, error: clientError } = (await supabaseAdmin
