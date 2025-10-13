@@ -54,9 +54,20 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
     redirect('/login')
   }
 
+  // 2. Get user role (using same method as middleware)
+  const userRole = user.user_metadata?.role as 'client' | 'employee' | undefined
+  const isEmployee = userRole === 'employee'
+
+  console.log('👤 [Project Detail] User role check:', {
+    role: userRole,
+    isEmployee,
+    userId: user.id,
+    email: user.email,
+  })
+
   console.log('📄 [Project Detail] Fetching project', id, 'for user', user.id)
 
-  // 2. Use admin client to fetch project with relations (bypasses RLS)
+  // 3. Use admin client to fetch project with relations (bypasses RLS)
   const supabaseAdmin = createAdminClient()
 
   const { data: project, error: projectError } = (await supabaseAdmin
@@ -83,23 +94,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
     notFound()
   }
 
-  // 3. Verify user has access to this project
-  const { data: userData, error: userError } = (await supabaseAdmin
-    .from('users')
-    .select('role')
-    .eq('id', user.id)
-    .single()) as { data: { role: string } | null; error: { message?: string } | null }
-
-  console.log('👤 [Project Detail] User role check:', {
-    hasUserData: !!userData,
-    role: userData?.role,
-    userError: userError?.message,
-  })
-
-  const isEmployee = userData && !userError ? userData.role === 'employee' : false
-  console.log('🔐 [Project Detail] Access check - isEmployee:', isEmployee, 'userId:', user.id)
-
-  // If not employee, verify client association
+  // 4. Verify client user has access to this project (employees have access to all)
   if (!isEmployee) {
     const { data: userClient, error: userClientError } = (await supabaseAdmin
       .from('user_clients')
@@ -114,7 +109,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       userClientError: userClientError?.message,
     })
 
-    // Only redirect if there's a real error (not just "no rows" which might mean setup issue)
+    // Only redirect if there's a real error (not just "no rows")
     if (userClientError && userClientError.message !== 'PGRST116') {
       console.error('❌ [Project Detail] Error fetching user_clients:', userClientError)
     }

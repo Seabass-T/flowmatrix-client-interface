@@ -60,29 +60,24 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
     redirect('/login')
   }
 
-  // 2. Use ADMIN CLIENT for data queries
-  const supabaseAdmin = createAdminClient()
-
-  // Verify user is employee
-  const { data: userData, error: userError } = (await supabaseAdmin
-    .from('users')
-    .select('email, role')
-    .eq('id', user.id)
-    .single()) as { data: { email: string; role: 'client' | 'employee' } | null; error: Error | null }
+  // 2. Verify user is employee (using same method as middleware)
+  const userRole = user.user_metadata?.role as 'client' | 'employee' | undefined
 
   console.log('👤 [Employee Client View] User role check:', {
-    hasUserData: !!userData,
-    role: userData?.role,
-    email: userData?.email,
-    userError: userError?.message,
+    role: userRole,
+    userId: user.id,
+    email: user.email,
   })
 
-  if (!userData || userData.role !== 'employee') {
-    console.error('❌ [Employee Client View] User is not employee - redirecting to client dashboard')
+  if (!userRole || userRole !== 'employee') {
+    console.error('❌ [Employee Client View] User is not employee - redirecting to client dashboard. Role:', userRole)
     redirect('/dashboard/client')
   }
 
-  // 3. Fetch client data with projects
+  // 3. Use ADMIN CLIENT for data queries
+  const supabaseAdmin = createAdminClient()
+
+  // 4. Fetch client data with projects
   const { data: client, error: clientError } = (await supabaseAdmin
     .from('clients')
     .select('*')
@@ -100,7 +95,7 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
     notFound()
   }
 
-  // 4. Fetch all projects for this client
+  // 5. Fetch all projects for this client
   const { data: projects, error: projectsError } = (await supabaseAdmin
     .from('projects')
     .select('*')
@@ -111,7 +106,7 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
     console.error('Error fetching projects:', projectsError)
   }
 
-  // 5. Fetch all tasks for client's projects
+  // 6. Fetch all tasks for client's projects
   const projectIds = projects?.map((p) => p.id) || []
   const { data: tasks } = await supabaseAdmin
     .from('tasks')
@@ -124,7 +119,7 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
     .in('project_id', projectIds)
     .order('due_date', { ascending: true, nullsFirst: false })
 
-  // 6. Calculate aggregate metrics
+  // 7. Calculate aggregate metrics
   const metrics = calculateAggregateMetrics(projects || [])
 
   return (
