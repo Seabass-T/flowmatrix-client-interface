@@ -14,7 +14,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts'
-import { formatCurrency, formatHours, calculateROI, calculateTotalCost } from '@/lib/calculations'
+import { formatCurrency, formatHours, calculateROI, calculateTotalCost, formatDate, formatDateLong } from '@/lib/calculations'
 import { ProjectWithRelations } from '@/types/database'
 
 /**
@@ -125,7 +125,7 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
       date.setDate(date.getDate() + i)
 
       data.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        date: formatDate(date),
         hoursSaved: metrics.hoursPerDay * i,
         roi: metrics.dailyROI * i,
       })
@@ -327,12 +327,12 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
                   </p>
                   {task.due_date && (
                     <p className="text-xs text-gray-500 mt-1">
-                      Due: {new Date(task.due_date).toLocaleDateString()}
+                      Due: {formatDateLong(task.due_date)}
                     </p>
                   )}
                   {task.completed_at && (
                     <p className="text-xs text-green-600 mt-1">
-                      Completed: {new Date(task.completed_at).toLocaleDateString()}
+                      Completed: {formatDateLong(task.completed_at)}
                     </p>
                   )}
                 </div>
@@ -363,11 +363,7 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
                     [{note.note_type === 'client' ? 'CLIENT' : 'FLOWMATRIX AI'}]
                   </span>
                   <span className="text-xs text-gray-500">
-                    {new Date(note.created_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
+                    {formatDateLong(note.created_at)}
                   </span>
                 </div>
                 <p className="text-sm text-gray-800">{note.content}</p>

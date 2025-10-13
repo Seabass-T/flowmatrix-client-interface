@@ -128,3 +128,32 @@ export function calculateTrend(
     direction,
   };
 }
+
+/**
+ * Format date consistently for both server and client rendering
+ * Prevents hydration mismatches by using predictable formatting
+ */
+export function formatDate(date: Date | string, options?: {
+  includeYear?: boolean
+  format?: 'short' | 'long'
+}): string {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+
+  // Use explicit formatting to ensure consistency across server/client
+  const month = dateObj.toLocaleString('en-US', { month: options?.format === 'long' ? 'long' : 'short', timeZone: 'UTC' });
+  const day = dateObj.getUTCDate();
+  const year = dateObj.getUTCFullYear();
+
+  if (options?.includeYear) {
+    return `${month} ${day}, ${year}`;
+  }
+
+  return `${month} ${day}`;
+}
+
+/**
+ * Format date with full details (Month Day, Year)
+ */
+export function formatDateLong(date: Date | string): string {
+  return formatDate(date, { includeYear: true, format: 'short' });
+}
