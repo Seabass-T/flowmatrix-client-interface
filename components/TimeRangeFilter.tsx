@@ -56,19 +56,19 @@ export function TimeRangeFilter({ currentRange }: TimeRangeFilterProps) {
   }
 
   return (
-    <div className="flex items-center space-x-2">
-      <span className="text-sm font-medium text-gray-700">Time Range:</span>
-      <div className="inline-flex rounded-lg border border-gray-300 bg-white p-1">
+    <div className="flex flex-wrap items-center gap-3">
+      <span className="text-sm font-semibold text-gray-700">Time Range:</span>
+      <div className="inline-flex rounded-lg border border-gray-300 bg-white p-1 shadow-sm">
         {TIME_RANGE_OPTIONS.map((option) => (
           <button
             key={option.value}
             onClick={() => handleRangeChange(option.value)}
             className={`
-              px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200
+              px-4 py-2 text-sm font-medium rounded-md transition-all duration-200
               ${
                 currentRange === option.value
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'bg-blue-900 text-white shadow-md scale-105'
+                  : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
               }
             `}
           >

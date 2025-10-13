@@ -1,95 +1,92 @@
 import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { NextResponse } from 'next/server'
+import { validateTestimonialCreate, validateUUID } from '@/lib/validation'
+import {
+  unauthorizedError,
+  forbiddenError,
+  validationError,
+  notFoundError,
+  handleSupabaseError,
+  serverError,
+} from '@/lib/errors'
 
 export async function POST(request: Request) {
   try {
-    // Authenticate user
+    // 1. Authenticate user
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in to submit testimonials')
     }
 
-    // Parse request body
-    const body = await request.json()
-    const { client_id, user_id, content } = body
-
-    // Validate input
-    if (!client_id || !user_id || !content) {
-      return NextResponse.json(
-        { error: 'Missing required fields: client_id, user_id, content' },
-        { status: 400 }
-      )
+    // 2. Parse and validate request body
+    let body: Record<string, unknown>
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      return validationError('Invalid JSON in request body')
     }
 
-    // Validate content length (300 characters max)
-    if (typeof content !== 'string' || content.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'Content must be a non-empty string' },
-        { status: 400 }
-      )
+    const validation = validateTestimonialCreate(body)
+    if (!validation.isValid) {
+      return validationError(validation.errors)
     }
 
-    if (content.length > 300) {
-      return NextResponse.json(
-        { error: 'Content must be 300 characters or less' },
-        { status: 400 }
-      )
+    const { client_id, user_id, content } = body as {
+      client_id: string
+      user_id: string
+      content: string
     }
 
-    // Verify user is authenticated and matches user_id
+    // 3. Verify user is authenticated and matches user_id
     if (user.id !== user_id) {
-      return NextResponse.json(
-        { error: 'User ID mismatch' },
-        { status: 403 }
-      )
+      return forbiddenError('User ID does not match authenticated user')
     }
 
-    // Use admin client to bypass RLS for data queries
+    // 4. Use admin client to bypass RLS for data queries
     const supabaseAdmin = createAdminClient()
 
-    // Verify user is a client and has access to this client_id
+    // 5. Verify user is a client
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
       .select('role')
       .eq('id', user_id)
-      .single() as { data: { role: string } | null; error: Error | null }
+      .single() as { data: { role: string } | null; error: { message?: string } | null }
 
-    if (userError || !userData) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      )
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
+    }
+
+    if (!userData) {
+      return notFoundError('User')
     }
 
     if (userData.role !== 'client') {
-      return NextResponse.json(
-        { error: 'Only clients can submit testimonials' },
-        { status: 403 }
-      )
+      return forbiddenError('Only clients can submit testimonials')
     }
 
-    // Verify user has access to this client
+    // 6. Verify user has access to this client
     const { data: userClient, error: userClientError } = await supabaseAdmin
       .from('user_clients')
       .select('client_id')
       .eq('user_id', user_id)
       .eq('client_id', client_id)
-      .single() as { data: { client_id: string } | null; error: Error | null }
+      .single() as { data: { client_id: string } | null; error: { message?: string } | null }
 
-    if (userClientError || !userClient) {
-      return NextResponse.json(
-        { error: 'User does not have access to this client' },
-        { status: 403 }
-      )
+    if (userClientError) {
+      return handleSupabaseError(userClientError, 'Failed to verify client access')
     }
 
-    // Insert testimonial
+    if (!userClient) {
+      return forbiddenError('You do not have access to this client')
+    }
+
+    // 7. Insert testimonial
     interface TestimonialData {
       id: string
       client_id: string
@@ -116,14 +113,18 @@ export async function POST(request: Request) {
       .select()
       .single()
 
-    const { data: testimonial, error: insertError } = result as { data: TestimonialData | null; error: Error | null }
+    const { data: testimonial, error: insertError } = result as {
+      data: TestimonialData | null
+      error: { message?: string } | null
+    }
 
     if (insertError) {
       console.error('Testimonial insert error:', insertError)
-      return NextResponse.json(
-        { error: 'Failed to submit testimonial' },
-        { status: 500 }
-      )
+      return handleSupabaseError(insertError, 'Failed to submit testimonial')
+    }
+
+    if (!testimonial) {
+      return serverError('Testimonial was not created')
     }
 
     return NextResponse.json(
@@ -134,68 +135,66 @@ export async function POST(request: Request) {
       { status: 201 }
     )
   } catch (error) {
-    console.error('Testimonial submission error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    console.error('Unexpected error in POST /api/testimonials:', error)
+    return serverError('An unexpected error occurred while submitting the testimonial', error as Error)
   }
 }
 
 export async function GET() {
   try {
-    // Authenticate user
+    // 1. Authenticate user
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in to view testimonials')
     }
 
-    // Use admin client for data queries
+    // 2. Use admin client for data queries
     const supabaseAdmin = createAdminClient()
 
-    // Check if user is employee
-    const { data: userData } = await supabaseAdmin
+    // 3. Check if user is employee
+    const { data: userData, error: userError } = (await supabaseAdmin
       .from('users')
       .select('role')
       .eq('id', user.id)
-      .single() as { data: { role: string } | null; error: Error | null }
+      .single()) as { data: { role: string } | null; error: { message?: string } | null }
 
-    if (!userData || userData.role !== 'employee') {
-      return NextResponse.json(
-        { error: 'Only employees can view all testimonials' },
-        { status: 403 }
-      )
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
     }
 
-    // Fetch all testimonials with client and user info
+    if (!userData) {
+      return notFoundError('User')
+    }
+
+    if (userData.role !== 'employee') {
+      return forbiddenError('Only employees can view all testimonials')
+    }
+
+    // 4. Fetch all testimonials with client and user info
     const { data: testimonials, error } = await supabaseAdmin
       .from('testimonials')
-      .select(`
+      .select(
+        `
         *,
         client:clients(id, company_name),
         user:users(id, email)
-      `)
+      `
+      )
       .order('created_at', { ascending: false })
 
     if (error) {
       console.error('Testimonials fetch error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch testimonials' },
-        { status: 500 }
-      )
+      return handleSupabaseError(error, 'Failed to fetch testimonials')
     }
 
     return NextResponse.json({ testimonials })
   } catch (error) {
-    console.error('Testimonials fetch error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    console.error('Unexpected error in GET /api/testimonials:', error)
+    return serverError('An unexpected error occurred while fetching testimonials', error as Error)
   }
 }

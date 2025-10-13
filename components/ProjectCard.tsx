@@ -53,41 +53,64 @@ export function ProjectCard({
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-lg shadow-md p-6 hover:shadow-xl transition-all duration-200 cursor-pointer hover:-translate-y-1"
+      className="group relative bg-white rounded-lg shadow-md p-6 hover:shadow-xl transition-all duration-300 cursor-pointer hover:-translate-y-1 hover:scale-[1.02] border border-transparent hover:border-blue-200"
     >
-      {/* Status Badge */}
+      {/* Status Badge with glow effect on hover */}
       <div className="flex items-center justify-between mb-4">
-        <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${STATUS_STYLES[status]}`}>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase transition-all duration-300 ${STATUS_STYLES[status]} group-hover:shadow-sm`}>
           {status}
         </span>
       </div>
 
-      {/* Project Name */}
-      <h3 className="text-xl font-bold text-gray-900 mb-4">{name}</h3>
+      {/* Project Name with color shift on hover */}
+      <h3 className="text-xl font-bold text-gray-900 mb-4 group-hover:text-blue-900 transition-colors duration-300">
+        {name}
+      </h3>
 
-      {/* Key Metrics */}
+      {/* Key Metrics with staggered animation on hover */}
       <div className="space-y-2 text-sm">
-        <div className="flex justify-between">
+        <div className="flex justify-between items-center group-hover:translate-x-1 transition-transform duration-300">
           <span className="text-gray-600">Time Saved:</span>
-          <span className="font-semibold text-gray-900">{formatHours(hoursSaved)}/day</span>
+          <span className="font-semibold text-gray-900 tabular-nums">{formatHours(hoursSaved)}/day</span>
         </div>
-        <div className="flex justify-between">
+        <div className="flex justify-between items-center group-hover:translate-x-1 transition-transform duration-300 delay-50">
           <span className="text-gray-600">ROI:</span>
-          <span className="font-semibold text-green-600">{formatCurrency(roi)}</span>
+          <span className="font-semibold text-green-600 tabular-nums group-hover:text-green-700 transition-colors">
+            {formatCurrency(roi)}
+          </span>
         </div>
-        <div className="flex justify-between">
+        <div className="flex justify-between items-center group-hover:translate-x-1 transition-transform duration-300 delay-100">
           <span className="text-gray-600">Cost:</span>
-          <span className="font-semibold text-gray-900">
+          <span className="font-semibold text-gray-900 tabular-nums">
             {totalCost === 0 ? 'Free' : formatCurrency(totalCost)}
           </span>
         </div>
       </div>
 
-      {/* Last Updated */}
-      <div className="mt-4 pt-4 border-t border-gray-200">
-        <span className="text-xs text-gray-500">
+      {/* Last Updated with fade effect */}
+      <div className="mt-4 pt-4 border-t border-gray-200 group-hover:border-gray-300 transition-colors duration-300">
+        <span className="text-xs text-gray-500 group-hover:text-gray-600 transition-colors duration-300">
           Last Updated: {lastUpdated.toLocaleDateString()}
         </span>
+      </div>
+
+      {/* Hover indicator - subtle arrow or shine effect */}
+      <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+        <div className="absolute top-3 right-3">
+          <svg
+            className="w-5 h-5 text-blue-600"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </div>
       </div>
     </div>
   )

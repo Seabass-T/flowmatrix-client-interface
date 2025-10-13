@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, memo, useMemo } from 'react'
 import { CheckCircle2, Circle, FileText, Download } from 'lucide-react'
 import {
   LineChart,
@@ -22,6 +22,8 @@ import { ProjectWithRelations } from '@/types/database'
  *
  * Reusable content for project details - can be used in modal or on a page.
  * Displays ROI charts, metrics, costs, tasks, notes, and files.
+ *
+ * PERFORMANCE: Memoized to prevent expensive re-renders of charts and calculations
  *
  * PRD Reference: Section 4.2.8 (Project Detail View)
  */
@@ -52,89 +54,118 @@ interface ProjectDetailContentProps {
   project: ProjectWithRelations
 }
 
-export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
+function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
 
-  // Calculate metrics
-  const goLiveDate = project.go_live_date ? new Date(project.go_live_date) : null
-  const daysActive = goLiveDate
-    ? Math.max(0, Math.floor((Date.now() - goLiveDate.getTime()) / (1000 * 60 * 60 * 24)))
-    : 0
-  const weeksActive = Math.floor(daysActive / 7)
+  // Memoize expensive calculations
+  const metrics = useMemo(() => {
+    const goLiveDate = project.go_live_date ? new Date(project.go_live_date) : null
+    const daysActive = goLiveDate
+      ? Math.max(0, Math.floor((Date.now() - goLiveDate.getTime()) / (1000 * 60 * 60 * 24)))
+      : 0
+    const weeksActive = Math.floor(daysActive / 7)
 
-  // Calculate hours saved per day
-  let hoursPerDay = 0
-  if (project.hours_saved_daily) {
-    hoursPerDay = project.hours_saved_daily
-  } else if (project.hours_saved_weekly) {
-    hoursPerDay = project.hours_saved_weekly / 7
-  } else if (project.hours_saved_monthly) {
-    hoursPerDay = project.hours_saved_monthly / 30
-  }
+    // Calculate hours saved per day
+    let hoursPerDay = 0
+    if (project.hours_saved_daily) {
+      hoursPerDay = project.hours_saved_daily
+    } else if (project.hours_saved_weekly) {
+      hoursPerDay = project.hours_saved_weekly / 7
+    } else if (project.hours_saved_monthly) {
+      hoursPerDay = project.hours_saved_monthly / 30
+    }
 
-  // Calculate ROI metrics
-  const dailyROI = calculateROI(hoursPerDay, project.employee_wage || 0)
-  const weeklyROI = dailyROI * 7
-  const monthlyROI = dailyROI * 30
-  const totalHoursSaved = hoursPerDay * daysActive
-  const totalROI = calculateROI(totalHoursSaved, project.employee_wage || 0)
+    // Calculate ROI metrics
+    const dailyROI = calculateROI(hoursPerDay, project.employee_wage || 0)
+    const weeklyROI = dailyROI * 7
+    const monthlyROI = dailyROI * 30
+    const totalHoursSaved = hoursPerDay * daysActive
+    const totalROI = calculateROI(totalHoursSaved, project.employee_wage || 0)
 
-  // Calculate costs
-  const totalCost = calculateTotalCost(
-    project.dev_cost || 0,
-    project.implementation_cost || 0,
-    project.monthly_maintenance || 0,
-    goLiveDate || undefined
-  )
+    // Calculate costs
+    const totalCost = calculateTotalCost(
+      project.dev_cost || 0,
+      project.implementation_cost || 0,
+      project.monthly_maintenance || 0,
+      goLiveDate || undefined
+    )
 
-  // Generate chart data
-  const generateChartData = () => {
+    return {
+      goLiveDate,
+      daysActive,
+      weeksActive,
+      hoursPerDay,
+      dailyROI,
+      weeklyROI,
+      monthlyROI,
+      totalHoursSaved,
+      totalROI,
+      totalCost,
+    }
+  }, [
+    project.go_live_date,
+    project.hours_saved_daily,
+    project.hours_saved_weekly,
+    project.hours_saved_monthly,
+    project.employee_wage,
+    project.dev_cost,
+    project.implementation_cost,
+    project.monthly_maintenance,
+  ])
+
+  // Memoize chart data generation
+  const chartData = useMemo(() => {
     const data = []
-    const days = timeRange === '7days' ? 7 : timeRange === 'month' ? 30 : timeRange === 'quarter' ? 90 : daysActive
+    const days =
+      timeRange === '7days' ? 7 : timeRange === 'month' ? 30 : timeRange === 'quarter' ? 90 : metrics.daysActive
     const step = Math.max(1, Math.floor(days / 20))
 
     for (let i = 0; i <= days; i += step) {
-      const date = new Date(goLiveDate || Date.now())
+      const date = new Date(metrics.goLiveDate || Date.now())
       date.setDate(date.getDate() + i)
 
       data.push({
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        hoursSaved: hoursPerDay * i,
-        roi: dailyROI * i,
+        hoursSaved: metrics.hoursPerDay * i,
+        roi: metrics.dailyROI * i,
       })
     }
 
     return data
-  }
+  }, [timeRange, metrics.daysActive, metrics.goLiveDate, metrics.hoursPerDay, metrics.dailyROI])
 
-  const chartData = generateChartData()
-
-  // Generate weekly ROI data for bar chart
-  const generateWeeklyROIData = () => {
-    const weeks = Math.min(weeksActive, 12)
+  // Memoize weekly ROI data
+  const weeklyROIData = useMemo(() => {
+    const weeks = Math.min(metrics.weeksActive, 12)
     return Array.from({ length: weeks }, (_, i) => ({
       week: `Week ${i + 1}`,
-      roi: weeklyROI,
+      roi: metrics.weeklyROI,
     }))
-  }
+  }, [metrics.weeksActive, metrics.weeklyROI])
 
-  const weeklyROIData = generateWeeklyROIData()
-
-  // Sort notes by date (newest first)
-  const sortedNotes = [...(project.notes || [])].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  // Memoize sorted notes
+  const sortedNotes = useMemo(
+    () =>
+      [...(project.notes || [])].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ),
+    [project.notes]
   )
 
-  // Sort tasks (incomplete first, then by due date)
-  const sortedTasks = [...(project.tasks || [])].sort((a, b) => {
-    if (a.is_completed !== b.is_completed) {
-      return a.is_completed ? 1 : -1
-    }
-    if (a.due_date && b.due_date) {
-      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
-    }
-    return 0
-  })
+  // Memoize sorted tasks
+  const sortedTasks = useMemo(
+    () =>
+      [...(project.tasks || [])].sort((a, b) => {
+        if (a.is_completed !== b.is_completed) {
+          return a.is_completed ? 1 : -1
+        }
+        if (a.due_date && b.due_date) {
+          return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+        }
+        return 0
+      }),
+    [project.tasks]
+  )
 
   return (
     <div className="space-y-8">
@@ -220,7 +251,7 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <p className="text-sm text-gray-600">Hours Saved/Day:</p>
-            <p className="text-lg font-bold text-gray-900">{formatHours(hoursPerDay)}</p>
+            <p className="text-lg font-bold text-gray-900">{formatHours(metrics.hoursPerDay)}</p>
           </div>
           <div>
             <p className="text-sm text-gray-600">Employee Wage:</p>
@@ -228,19 +259,19 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
           </div>
           <div>
             <p className="text-sm text-gray-600">Daily ROI:</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(dailyROI)}</p>
+            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.dailyROI)}</p>
           </div>
           <div>
             <p className="text-sm text-gray-600">Weekly ROI:</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(weeklyROI)}</p>
+            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.weeklyROI)}</p>
           </div>
           <div>
             <p className="text-sm text-gray-600">Monthly ROI:</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(monthlyROI)}</p>
+            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.monthlyROI)}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Total ROI ({weeksActive} weeks):</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(totalROI)}</p>
+            <p className="text-sm text-gray-600">Total ROI ({metrics.weeksActive} weeks):</p>
+            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.totalROI)}</p>
           </div>
         </div>
       </section>
@@ -270,7 +301,7 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
           <div>
             <p className="text-sm text-gray-600">Total Cost to Date:</p>
             <p className="text-lg font-bold text-gray-900">
-              {totalCost === 0 ? 'Free' : formatCurrency(totalCost)}
+              {metrics.totalCost === 0 ? 'Free' : formatCurrency(metrics.totalCost)}
             </p>
           </div>
         </div>
@@ -383,3 +414,6 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
     </div>
   )
 }
+
+// Export memoized version to prevent unnecessary re-renders
+export const ProjectDetailContent = memo(ProjectDetailContentComponent)

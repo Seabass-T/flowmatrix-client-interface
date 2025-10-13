@@ -12,6 +12,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { redirect } from 'next/navigation'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 export default async function EmployeeLayout({ children }: { children: React.ReactNode }) {
   // 1. Auth check with regular client
@@ -37,5 +38,9 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
     redirect('/dashboard/client')
   }
 
-  return <>{children}</>
+  return (
+    <ErrorBoundary>
+      {children}
+    </ErrorBoundary>
+  )
 }

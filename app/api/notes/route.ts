@@ -1,6 +1,14 @@
 import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
-import { NextResponse } from 'next/server'
+import { validateNoteCreate, validateUUID, validateLength } from '@/lib/validation'
+import {
+  unauthorizedError,
+  forbiddenError,
+  validationError,
+  notFoundError,
+  handleSupabaseError,
+  serverError,
+} from '@/lib/errors'
 import { User, UserClient, Project } from '@/types/database'
 
 /**
@@ -9,49 +17,61 @@ import { User, UserClient, Project } from '@/types/database'
  */
 export async function GET(request: Request) {
   try {
-    // Auth check
+    // 1. Authentication
     const supabase = await createClient()
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in to view notes')
     }
 
-    // Get query params
+    // 2. Validate query params
     const { searchParams } = new URL(request.url)
     const projectId = searchParams.get('project_id')
 
     if (!projectId) {
-      return NextResponse.json({ error: 'project_id is required' }, { status: 400 })
+      return validationError('project_id parameter is required')
     }
 
-    // Use admin client for data queries
-    const supabaseAdmin = createAdminClient()
+    const uuidValidation = validateUUID(projectId, 'Project ID')
+    if (!uuidValidation.isValid && uuidValidation.error) {
+      return validationError(uuidValidation.error)
+    }
 
-    // Verify user has access to this project
+    // 3. Get user role
+    const supabaseAdmin = createAdminClient()
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
       .select<'role', Pick<User, 'role'>>('role')
       .eq('id', user.id)
       .single()
 
-    if (userError || !userData) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
+    }
+
+    if (!userData) {
+      return notFoundError('User')
     }
 
     const userRole = userData.role
 
-    // If client, verify they own this project
+    // 4. Authorization: Verify access to project
     if (userRole === 'client') {
       const { data: userClients, error: ucError } = await supabaseAdmin
         .from('user_clients')
         .select<'client_id', Pick<UserClient, 'client_id'>>('client_id')
         .eq('user_id', user.id)
 
-      if (ucError || !userClients) {
-        return NextResponse.json({ error: 'Failed to verify access' }, { status: 500 })
+      if (ucError) {
+        return handleSupabaseError(ucError, 'Failed to verify client access')
+      }
+
+      if (!userClients || userClients.length === 0) {
+        return forbiddenError('You are not associated with any clients')
       }
 
       const clientIds = userClients.map((uc) => uc.client_id)
@@ -62,12 +82,20 @@ export async function GET(request: Request) {
         .eq('id', projectId)
         .single()
 
-      if (projectError || !project || !clientIds.includes(project.client_id)) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      if (projectError) {
+        return handleSupabaseError(projectError, 'Failed to verify project access')
+      }
+
+      if (!project) {
+        return notFoundError('Project')
+      }
+
+      if (!clientIds.includes(project.client_id)) {
+        return forbiddenError('You do not have access to this project')
       }
     }
 
-    // Fetch notes for the project
+    // 5. Fetch notes for the project
     const { data: notes, error } = await supabaseAdmin
       .from('notes')
       .select('*')
@@ -76,13 +104,16 @@ export async function GET(request: Request) {
 
     if (error) {
       console.error('Error fetching notes:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return handleSupabaseError(error, 'Failed to fetch notes')
     }
 
-    return NextResponse.json(notes || [])
+    return new Response(JSON.stringify(notes || []), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
   } catch (error) {
     console.error('Unexpected error in GET /api/notes:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return serverError('An unexpected error occurred while fetching notes', error as Error)
   }
 }
 
@@ -92,76 +123,76 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    // Auth check
+    // 1. Authentication
     const supabase = await createClient()
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in to create notes')
     }
 
-    const body = await request.json()
-    const { project_id, note_type, content } = body
-
-    // Validate required fields
-    if (!project_id || !note_type || !content) {
-      return NextResponse.json(
-        { error: 'project_id, note_type, and content are required' },
-        { status: 400 }
-      )
+    // 2. Parse and validate request body
+    let body: Record<string, unknown>
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      return validationError('Invalid JSON in request body')
     }
 
-    // Validate note_type
-    if (!['client', 'flowmatrix_ai'].includes(note_type)) {
-      return NextResponse.json(
-        { error: 'note_type must be "client" or "flowmatrix_ai"' },
-        { status: 400 }
-      )
+    const validation = validateNoteCreate(body)
+    if (!validation.isValid) {
+      return validationError(validation.errors)
     }
 
-    // Use admin client for data queries
+    const { project_id, note_type, content } = body as {
+      project_id: string
+      note_type: string
+      content: string
+    }
+
+    // 3. Get user role
     const supabaseAdmin = createAdminClient()
-
-    // Get user role
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
       .select<'role', Pick<User, 'role'>>('role')
       .eq('id', user.id)
       .single()
 
-    if (userError || !userData) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
+    }
+
+    if (!userData) {
+      return notFoundError('User')
     }
 
     const userRole = userData.role
 
-    // CRITICAL RLS ENFORCEMENT: Clients can only create 'client' type notes
+    // 4. Authorization: Verify note type permissions
     if (userRole === 'client' && note_type !== 'client') {
-      return NextResponse.json(
-        { error: 'Clients can only create client notes' },
-        { status: 403 }
-      )
+      return forbiddenError('Clients can only create client notes')
     }
 
-    // Employees can create 'flowmatrix_ai' type notes
     if (userRole === 'employee' && note_type !== 'flowmatrix_ai') {
-      return NextResponse.json(
-        { error: 'Employees can only create FlowMatrix AI notes' },
-        { status: 403 }
-      )
+      return forbiddenError('Employees can only create FlowMatrix AI notes')
     }
 
-    // Verify user has access to this project
+    // 5. Authorization: Verify access to project
     if (userRole === 'client') {
       const { data: userClients, error: ucError } = await supabaseAdmin
         .from('user_clients')
         .select<'client_id', Pick<UserClient, 'client_id'>>('client_id')
         .eq('user_id', user.id)
 
-      if (ucError || !userClients) {
-        return NextResponse.json({ error: 'Failed to verify access' }, { status: 500 })
+      if (ucError) {
+        return handleSupabaseError(ucError, 'Failed to verify client access')
+      }
+
+      if (!userClients || userClients.length === 0) {
+        return forbiddenError('You are not associated with any clients')
       }
 
       const clientIds = userClients.map((uc) => uc.client_id)
@@ -172,12 +203,33 @@ export async function POST(request: Request) {
         .eq('id', project_id)
         .single()
 
-      if (projectError || !project || !clientIds.includes(project.client_id)) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      if (projectError) {
+        return handleSupabaseError(projectError, 'Failed to verify project access')
+      }
+
+      if (!project) {
+        return notFoundError('Project')
+      }
+
+      if (!clientIds.includes(project.client_id)) {
+        return forbiddenError('You do not have access to this project')
       }
     }
 
-    // Create the note
+    // 6. Verify project exists (for employees)
+    if (userRole === 'employee') {
+      const { data: project, error: projectError } = await supabaseAdmin
+        .from('projects')
+        .select('id')
+        .eq('id', project_id)
+        .single()
+
+      if (projectError || !project) {
+        return validationError('Invalid project_id: Project does not exist')
+      }
+    }
+
+    // 7. Create the note
     const { data: newNote, error } = await supabaseAdmin
       .from('notes')
       .insert({
@@ -193,13 +245,20 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('Error creating note:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return handleSupabaseError(error, 'Failed to create note')
     }
 
-    return NextResponse.json(newNote, { status: 201 })
+    if (!newNote) {
+      return serverError('Note was not created')
+    }
+
+    return new Response(JSON.stringify(newNote), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    })
   } catch (error) {
     console.error('Unexpected error in POST /api/notes:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return serverError('An unexpected error occurred while creating the note', error as Error)
   }
 }
 
@@ -209,66 +268,86 @@ export async function POST(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    // Auth check
+    // 1. Authentication
     const supabase = await createClient()
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in to update notes')
     }
 
-    const body = await request.json()
+    // 2. Parse and validate request body
+    let body: Record<string, unknown>
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      return validationError('Invalid JSON in request body')
+    }
+
     const { id, content } = body
 
-    if (!id || !content) {
-      return NextResponse.json({ error: 'id and content are required' }, { status: 400 })
+    // Validate required fields
+    const idValidation = validateUUID(id as string, 'Note ID')
+    if (!idValidation.isValid && idValidation.error) {
+      return validationError(idValidation.error)
     }
 
-    // Use admin client for data queries
-    const supabaseAdmin = createAdminClient()
+    const lengthValidation = validateLength(content as string, 1, 500, 'Content')
+    if (!lengthValidation.isValid && lengthValidation.error) {
+      return validationError(lengthValidation.error)
+    }
 
-    // Get the existing note
+    // 3. Get existing note
+    const supabaseAdmin = createAdminClient()
     const { data: existingNote, error: fetchError } = await supabaseAdmin
       .from('notes')
       .select<'*', { id: string; author_id: string; note_type: string; content: string }>('*')
       .eq('id', id)
       .single()
 
-    if (fetchError || !existingNote) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 })
+    if (fetchError) {
+      return handleSupabaseError(fetchError, 'Failed to fetch note')
     }
 
-    // Get user role
+    if (!existingNote) {
+      return notFoundError('Note')
+    }
+
+    // 4. Get user role
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
       .select<'role', Pick<User, 'role'>>('role')
       .eq('id', user.id)
       .single()
 
-    if (userError || !userData) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
+    }
+
+    if (!userData) {
+      return notFoundError('User')
     }
 
     const userRole = userData.role
 
-    // Permission check: Employees can edit all notes, clients can only edit their own
+    // 5. Authorization: Permission check
     if (userRole === 'client') {
       if (existingNote.author_id !== user.id) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        return forbiddenError('You can only edit your own notes')
       }
       if (existingNote.note_type !== 'client') {
-        return NextResponse.json({ error: 'Clients can only edit client notes' }, { status: 403 })
+        return forbiddenError('Clients can only edit client notes')
       }
     }
 
-    // Update the note
-    // Type assertion needed due to Supabase client type inference issues with admin client
+    // 6. Update the note
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateResult = await (supabaseAdmin as any)
       .from('notes')
-      .update({ content: content.trim() })
+      .update({ content: (content as string).trim() })
       .eq('id', id)
       .select()
       .single()
@@ -280,13 +359,20 @@ export async function PATCH(request: Request) {
 
     if (updateError) {
       console.error('Error updating note:', updateError)
-      return NextResponse.json({ error: updateError.message }, { status: 500 })
+      return handleSupabaseError(updateError, 'Failed to update note')
     }
 
-    return NextResponse.json(updatedNote)
+    if (!updatedNote) {
+      return serverError('Note was not updated')
+    }
+
+    return new Response(JSON.stringify(updatedNote), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
   } catch (error) {
     console.error('Unexpected error in PATCH /api/notes:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return serverError('An unexpected error occurred while updating the note', error as Error)
   }
 }
 
@@ -296,74 +382,89 @@ export async function PATCH(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    // Auth check
+    // 1. Authentication
     const supabase = await createClient()
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser()
 
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in to delete notes')
     }
 
-    const body = await request.json()
+    // 2. Parse and validate request body
+    let body: Record<string, unknown>
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      return validationError('Invalid JSON in request body')
+    }
+
     const { id } = body
 
-    if (!id) {
-      return NextResponse.json({ error: 'id is required' }, { status: 400 })
+    const idValidation = validateUUID(id as string, 'Note ID')
+    if (!idValidation.isValid && idValidation.error) {
+      return validationError(idValidation.error)
     }
 
-    // Use admin client for data queries
+    // 3. Get existing note
     const supabaseAdmin = createAdminClient()
-
-    // Get the existing note
     const { data: existingNote, error: fetchError } = await supabaseAdmin
       .from('notes')
       .select<'*', { id: string; author_id: string; note_type: string; content: string }>('*')
       .eq('id', id)
       .single()
 
-    if (fetchError || !existingNote) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 })
+    if (fetchError) {
+      return handleSupabaseError(fetchError, 'Failed to fetch note')
     }
 
-    // Get user role
+    if (!existingNote) {
+      return notFoundError('Note')
+    }
+
+    // 4. Get user role
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
       .select<'role', Pick<User, 'role'>>('role')
       .eq('id', user.id)
       .single()
 
-    if (userError || !userData) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
+    }
+
+    if (!userData) {
+      return notFoundError('User')
     }
 
     const userRole = userData.role
 
-    // Permission check: Employees can delete all notes, clients can only delete their own
+    // 5. Authorization: Permission check
     if (userRole === 'client') {
       if (existingNote.author_id !== user.id) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        return forbiddenError('You can only delete your own notes')
       }
       if (existingNote.note_type !== 'client') {
-        return NextResponse.json(
-          { error: 'Clients can only delete client notes' },
-          { status: 403 }
-        )
+        return forbiddenError('Clients can only delete client notes')
       }
     }
 
-    // Delete the note
+    // 6. Delete the note
     const { error: deleteError } = await supabaseAdmin.from('notes').delete().eq('id', id)
 
     if (deleteError) {
       console.error('Error deleting note:', deleteError)
-      return NextResponse.json({ error: deleteError.message }, { status: 500 })
+      return handleSupabaseError(deleteError, 'Failed to delete note')
     }
 
-    return NextResponse.json({ success: true })
+    return new Response(JSON.stringify({ success: true, message: 'Note deleted successfully' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
   } catch (error) {
     console.error('Unexpected error in DELETE /api/notes:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return serverError('An unexpected error occurred while deleting the note', error as Error)
   }
 }

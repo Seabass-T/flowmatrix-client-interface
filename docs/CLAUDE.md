@@ -48,6 +48,77 @@ pnpm lint
 
 Dev server: http://localhost:3000
 
+### PostgreSQL MCP Access
+
+The project has direct database access via the **PostgreSQL MCP** (Model Context Protocol) configured in Claude Code. This enables powerful database debugging and development capabilities.
+
+**What You Can Do:**
+- Execute raw SQL queries against the Supabase database
+- Inspect table schemas, columns, types, constraints
+- View and test Row-Level Security (RLS) policies
+- Check indexes and their performance
+- Analyze query execution plans
+- Validate data integrity and relationships
+- Debug database-related issues in real-time
+
+**Example Commands:**
+```bash
+# Schema inspection
+"Show me the schema for the projects table"
+"What columns does the notes table have?"
+"List all indexes on the tasks table"
+
+# Data queries
+"Get all active projects with their client names"
+"Find clients with more than 5 projects"
+"Show projects created in the last 7 days"
+
+# RLS policy verification
+"Show me the RLS policies on the projects table"
+"Verify which tables have RLS enabled"
+"Test if client users can access only their own projects"
+
+# Performance analysis
+"Explain the query plan for fetching dashboard data"
+"Find slow queries in the recent logs"
+"Check for missing indexes on foreign keys"
+
+# Data validation
+"Find projects with NULL go_live_date"
+"Check for orphaned records in user_clients"
+"Verify all employees have valid email addresses"
+```
+
+**When to Use:**
+1. **Debugging RLS Issues:** When clients/employees see incorrect data
+2. **Schema Changes:** Before modifying database structure
+3. **Data Integrity:** Checking for data inconsistencies
+4. **Performance:** Optimizing slow queries
+5. **Testing:** Verifying database functions and triggers
+6. **Development:** Understanding existing data patterns
+
+**Configuration:**
+Located in `~/.config/claude/config.json`:
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "enhanced-postgres-mcp-server"],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:[PASSWORD]@db.iqcwmkacfxgqkzpzdwpe.supabase.co:5432/postgres"
+      }
+    }
+  }
+}
+```
+
+**Security Note:**
+- This is a **development-only** tool
+- Uses direct PostgreSQL connection (not Supabase API)
+- Has admin-level database access (bypasses RLS)
+- Never commit the DATABASE_URL with password to version control
+
 ---
 
 ## Technology Stack
@@ -379,46 +450,412 @@ xl:   1280px // Large Desktop
 
 ### 6. Auto-Save Pattern (Critical for Edit Mode)
 
-**Implementation:**
+**⚠️ IMPORTANT: The Actual Pattern Used in This Codebase**
+
+We use **native setTimeout for debouncing** (not the `use-debounce` library) with comprehensive state management. This pattern is used in all editable components.
+
+**Implementation (See `EditableProjectCard.tsx` and `EditableProjectDetailContent.tsx`):**
+
 ```typescript
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useDebouncedCallback } from 'use-debounce'
+import { useRouter } from 'next/navigation'
+import { Check, AlertCircle } from 'lucide-react'
 
-export function EditableField({ value, onSave }) {
-  const [localValue, setLocalValue] = useState(value)
-  const [saving, setSaving] = useState(false)
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
-  const debouncedSave = useDebouncedCallback(async (newValue) => {
-    setSaving(true)
-    try {
-      await onSave(newValue)
-      // Show success indicator
-    } catch (error) {
-      // Rollback on error
-      setLocalValue(value)
-    } finally {
-      setSaving(false)
+interface EditableComponentProps {
+  project: Project
+  onUpdate?: (updatedProject: Project) => void
+}
+
+export function EditableComponent({ project: initialProject, onUpdate }: EditableComponentProps) {
+  const router = useRouter()
+
+  // State management
+  const [project, setProject] = useState(initialProject)
+  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [errorMessage, setErrorMessage] = useState<string>('')
+  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null)
+
+  // Sync local state when prop changes
+  useEffect(() => {
+    setProject(initialProject)
+  }, [initialProject])
+
+  // Debounced save function (1 second)
+  const handleFieldChange = (field: keyof Project, value: string | number | null) => {
+    // 1. Update local state immediately (optimistic update)
+    const updatedProject = { ...project, [field]: value }
+    setProject(updatedProject)
+
+    // 2. Clear existing timeout
+    if (saveTimeout) {
+      clearTimeout(saveTimeout)
     }
-  }, 1000) // 1-second debounce
 
-  const handleChange = (e) => {
-    const newValue = e.target.value
-    setLocalValue(newValue)
-    debouncedSave(newValue)
+    // 3. Set new timeout for auto-save
+    const timeout = setTimeout(async () => {
+      await saveProject(updatedProject)
+    }, 1000) // 1-second debounce
+
+    setSaveTimeout(timeout)
+  }
+
+  // Save project to API
+  const saveProject = async (projectToSave: Project) => {
+    setSaveState('saving')
+    setErrorMessage('')
+
+    try {
+      const response = await fetch(`/api/projects/${projectToSave.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // Only send fields you want to update
+          hours_saved_daily: projectToSave.hours_saved_daily,
+          employee_wage: projectToSave.employee_wage,
+          status: projectToSave.status,
+          // ... other editable fields
+        }),
+      })
+
+      if (!response.ok) {
+        // Handle non-JSON error responses (HTML error pages)
+        let errorMessage = `Failed to save (${response.status})`
+        try {
+          const error = await response.json()
+          errorMessage = error.error || errorMessage
+        } catch {
+          errorMessage = response.statusText || errorMessage
+        }
+        throw new Error(errorMessage)
+      }
+
+      const updatedProject = await response.json()
+      setSaveState('saved')
+
+      // Notify parent component
+      if (onUpdate) {
+        onUpdate(updatedProject)
+      }
+
+      // Refresh server data (for computed fields)
+      router.refresh()
+
+      // Reset to idle after 2 seconds
+      setTimeout(() => {
+        setSaveState('idle')
+      }, 2000)
+    } catch (error) {
+      console.error('Error saving project:', error)
+      setSaveState('error')
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to save')
+
+      // Rollback on error
+      setProject(initialProject)
+
+      // Reset error state after 5 seconds
+      setTimeout(() => {
+        setSaveState('idle')
+        setErrorMessage('')
+      }, 5000)
+    }
   }
 
   return (
-    <div>
-      <input value={localValue} onChange={handleChange} />
-      {saving && <span className="text-xs text-gray-500">Saving...</span>}
+    <div className="relative">
+      {/* Save Status Indicator */}
+      <div className="absolute top-4 right-4 flex items-center gap-2 text-xs font-medium">
+        {saveState === 'saving' && (
+          <span className="text-gray-500 flex items-center gap-1">
+            <span className="animate-spin">⏳</span> Saving...
+          </span>
+        )}
+        {saveState === 'saved' && (
+          <span className="text-green-600 flex items-center gap-1">
+            <Check className="w-4 h-4" /> Saved
+          </span>
+        )}
+        {saveState === 'error' && (
+          <span className="text-red-600 flex items-center gap-1">
+            <AlertCircle className="w-4 h-4" /> {errorMessage || 'Error'}
+          </span>
+        )}
+      </div>
+
+      {/* Editable Fields with Yellow Borders */}
+      <input
+        type="number"
+        value={project.hours_saved_daily || ''}
+        onChange={(e) => handleFieldChange('hours_saved_daily', e.target.value ? parseFloat(e.target.value) : null)}
+        className="w-20 px-2 py-1 text-right font-semibold text-gray-900 border-2 border-yellow-300 rounded focus:outline-none focus:ring-2 focus:ring-yellow-400"
+        placeholder="0.0"
+      />
+
+      <select
+        value={project.status}
+        onChange={(e) => handleFieldChange('status', e.target.value as ProjectStatus)}
+        className="px-3 py-1 rounded-full text-xs font-semibold uppercase cursor-pointer border-2 border-yellow-300"
+      >
+        <option value="active">Active</option>
+        <option value="dev">Dev</option>
+        <option value="proposed">Proposed</option>
+        <option value="inactive">Inactive</option>
+      </select>
     </div>
   )
 }
 ```
 
-### 7. Data Visualization (Recharts)
+**Key Features of This Pattern:**
+
+1. **1-Second Debounce:** Saves 1 second after user stops typing (not on blur)
+2. **Optimistic Updates:** UI updates immediately before server response
+3. **Error Rollback:** Reverts to original value if save fails
+4. **Visual Feedback:** Clear indicators for saving, saved, and error states
+5. **Yellow Borders:** `border-2 border-yellow-300` on all editable fields
+6. **Auto-Clear States:** Success shows for 2 seconds, errors for 5 seconds
+7. **Server Refresh:** Uses `router.refresh()` to update computed fields after save
+
+**Where This Pattern is Used:**
+- `EditableProjectCard.tsx` - Project cards in list view
+- `EditableProjectDetailContent.tsx` - Full project detail page
+- `EditableWageField.tsx` - Client default wage inline editor
+
+**API Routes That Support This:**
+- `/app/api/projects/[id]/route.ts` - PATCH for project updates
+- `/app/api/clients/[id]/route.ts` - PATCH for client updates
+
+### 7. Loading States & Empty States Pattern
+
+**⚠️ IMPORTANT:** Always provide loading and empty states for async data and conditional content.
+
+#### Loading Skeletons (`/components/LoadingSkeletons.tsx`)
+
+**When to Use:**
+- Data is being fetched from the database (async operations)
+- Navigation to a new page that requires data loading
+- Form submission is processing
+- Charts/visualizations are being generated
+
+**Available Skeletons:**
+```typescript
+import {
+  Skeleton,              // Base skeleton with pulse animation
+  ProjectCardSkeleton,   // Single project card skeleton
+  ProjectCardListSkeleton, // Grid of 3 project cards
+  TaskItemSkeleton,      // Single task item
+  TaskListSkeleton,      // List of task items
+  NotesPanelSkeleton,    // Dual-panel notes layout
+  ClientCardSkeleton,    // Client card for employee dashboard
+  ChartSkeleton,         // Chart visualization skeleton
+  DashboardSkeleton,     // Full page dashboard skeleton
+  MetricCardSkeleton,    // Metric card skeleton (from MetricCard.tsx)
+} from '@/components/LoadingSkeletons'
+```
+
+**Usage Pattern:**
+```typescript
+// In Server Components with Suspense
+import { Suspense } from 'react'
+import { ProjectCardListSkeleton } from '@/components/LoadingSkeletons'
+
+export default async function Page() {
+  return (
+    <Suspense fallback={<ProjectCardListSkeleton />}>
+      <ProjectList />
+    </Suspense>
+  )
+}
+
+// In Client Components with conditional rendering
+'use client'
+
+export function ProjectList() {
+  const [projects, setProjects] = useState<Project[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    fetchProjects().then(data => {
+      setProjects(data)
+      setIsLoading(false)
+    })
+  }, [])
+
+  if (isLoading) {
+    return <ProjectCardListSkeleton />
+  }
+
+  return <div>{/* Render projects */}</div>
+}
+```
+
+#### Empty States (`/components/EmptyStates.tsx`)
+
+**When to Use:**
+- No data exists (empty arrays, null values)
+- Search/filter returns no results
+- User hasn't created any content yet
+- Errors occur during data fetching
+
+**Available Empty States:**
+```typescript
+import {
+  EmptyState,        // Base empty state (customizable)
+  EmptyProjects,     // No projects exist
+  EmptyTasks,        // No tasks exist
+  EmptyNotes,        // No notes exist (client or flowmatrix_ai)
+  EmptyClients,      // No clients exist (employee dashboard)
+  ErrorState,        // Error occurred
+  NoResults,         // Search/filter returned nothing
+  CompactEmptyState, // Smaller variant for compact containers
+} from '@/components/EmptyStates'
+```
+
+**Usage Pattern:**
+```typescript
+'use client'
+
+export function ProjectCardList({ projects, isEditMode }) {
+  // Show empty state if no projects
+  if (projects.length === 0) {
+    return <EmptyProjects isEmployee={isEditMode} />
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {projects.map(project => (
+        <ProjectCard key={project.id} {...project} />
+      ))}
+    </div>
+  )
+}
+
+// Error state with retry
+export function DataFetcher() {
+  const [error, setError] = useState<Error | null>(null)
+
+  if (error) {
+    return (
+      <ErrorState
+        title="Failed to load data"
+        description={error.message}
+        onRetry={() => {
+          setError(null)
+          refetch()
+        }}
+      />
+    )
+  }
+
+  // ... rest of component
+}
+```
+
+**Custom Empty State:**
+```typescript
+<EmptyState
+  icon={<CustomIcon className="w-16 h-16" />}
+  title="Custom Title"
+  description="Custom description text"
+  action={{
+    label: "Take Action",
+    onClick: () => handleAction()
+  }}
+/>
+```
+
+**Best Practices:**
+1. Always check for empty data before rendering lists
+2. Use context-aware messaging (different for clients vs employees)
+3. Provide action buttons when users can create content
+4. Use friendly, encouraging language
+5. Include relevant icons from Lucide React
+6. Maintain consistent styling with white background, rounded corners, shadow
+
+### 8. Button Component System
+
+**⚠️ IMPORTANT:** Always use the Button component for consistency. Never create custom button styles inline.
+
+#### Button Component (`/components/Button.tsx`)
+
+**Variants:**
+- **primary** - Deep Blue background, white text (main actions)
+- **secondary** - White background, gray border (secondary actions)
+- **danger** - Red background, white text (destructive actions)
+- **ghost** - Transparent background (subtle actions)
+
+**Sizes:**
+- **sm** - Small button (px-3 py-1.5 text-sm)
+- **md** - Medium button (px-6 py-3 text-base) - Default
+- **lg** - Large button (px-8 py-4 text-lg)
+
+**Features:**
+- Loading state with spinner
+- Disabled state
+- Left/right icon support
+- Smooth hover animations (scale, shadow)
+- Active state (scale-down)
+- Focus ring for accessibility
+
+**Usage:**
+```typescript
+import { Button, IconButton, ButtonGroup } from '@/components/Button'
+import { Plus, Save, Trash2 } from 'lucide-react'
+
+// Primary button with loading state
+<Button
+  variant="primary"
+  size="md"
+  isLoading={isSaving}
+  onClick={handleSave}
+>
+  Save Changes
+</Button>
+
+// Button with left icon
+<Button
+  variant="primary"
+  leftIcon={<Plus className="w-5 h-5" />}
+  onClick={handleAdd}
+>
+  Add Project
+</Button>
+
+// Danger button
+<Button
+  variant="danger"
+  size="sm"
+  rightIcon={<Trash2 className="w-4 h-4" />}
+  onClick={handleDelete}
+>
+  Delete
+</Button>
+
+// Icon-only button
+<IconButton
+  icon={<Save className="w-5 h-5" />}
+  variant="ghost"
+  aria-label="Save"
+  onClick={handleSave}
+/>
+
+// Button group for related actions
+<ButtonGroup>
+  <Button variant="secondary" onClick={handleCancel}>Cancel</Button>
+  <Button variant="primary" onClick={handleSave}>Save</Button>
+</ButtonGroup>
+```
+
+**When to Use Each Variant:**
+- **Primary** - Main call-to-action (Save, Submit, Create, Add)
+- **Secondary** - Alternative actions (Cancel, Back, View More)
+- **Danger** - Destructive actions (Delete, Remove, Revoke)
+- **Ghost** - Subtle actions (Close, Dismiss, Icon buttons)
+
+### 9. Data Visualization (Recharts)
 
 **Chart Types:**
 - **Line Chart:** Time-based trends (ROI over time, hours saved)
@@ -443,6 +880,540 @@ export function ROIChart({ data }) {
   )
 }
 ```
+
+### 10. Error Handling & Validation Pattern
+
+**⚠️ IMPORTANT:** All API routes and components must implement comprehensive error handling following this established pattern.
+
+#### Error Handling Architecture
+
+**Three-Layer Approach:**
+1. **Server-Side Validation** - API routes validate all inputs
+2. **Client-Side Validation** - Components validate before submission
+3. **Error Boundaries** - React error boundaries catch render errors
+
+#### Core Utilities
+
+**`lib/validation.ts` - Type-Safe Validation Functions:**
+```typescript
+import { validateEmail, validateUUID, validateLength, validateNumberRange } from '@/lib/validation'
+
+// Email validation (RFC 5322 compliant)
+const emailResult = validateEmail('user@example.com')
+if (!emailResult.isValid) {
+  console.error(emailResult.error) // "Please enter a valid email address"
+}
+
+// UUID validation
+const uuidResult = validateUUID(id, 'Project ID')
+if (!uuidResult.isValid && uuidResult.error) {
+  return validationError(uuidResult.error)
+}
+
+// Length validation (min, max)
+const lengthResult = validateLength(content, 1, 500, 'Content')
+
+// Number range validation
+const rangeResult = validateNumberRange(wage, 0, 1000, 'Employee wage')
+
+// Domain-specific validators
+const taskValidation = validateTaskCreate(body)
+if (!taskValidation.isValid) {
+  return validationError(taskValidation.errors)
+}
+```
+
+**`lib/errors.ts` - Error Response Helpers:**
+```typescript
+import {
+  unauthorizedError,
+  forbiddenError,
+  validationError,
+  notFoundError,
+  handleSupabaseError,
+  serverError,
+  isNetworkError,
+  getUserFriendlyErrorMessage,
+} from '@/lib/errors'
+
+// API route error responses
+if (!user) return unauthorizedError('You must be logged in')
+if (role !== 'employee') return forbiddenError('Only employees can edit projects')
+if (!validation.isValid) return validationError(validation.errors)
+if (!project) return notFoundError('Project')
+if (dbError) return handleSupabaseError(dbError, 'Failed to fetch project')
+
+// Client-side error handling
+if (isNetworkError(error)) {
+  setError('Unable to connect. Check your internet connection.')
+} else {
+  setError(getUserFriendlyErrorMessage(error))
+}
+```
+
+#### API Route Pattern
+
+**Standard Error Handling for All API Routes:**
+```typescript
+import { createClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-admin'
+import { validateUUID, validateTaskCreate } from '@/lib/validation'
+import {
+  unauthorizedError,
+  forbiddenError,
+  validationError,
+  notFoundError,
+  handleSupabaseError,
+  serverError,
+} from '@/lib/errors'
+
+export async function POST(request: Request) {
+  try {
+    // 1. Authenticate user
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return unauthorizedError('You must be logged in')
+    }
+
+    // 2. Parse and validate request body
+    let body: Record<string, unknown>
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      return validationError('Invalid JSON in request body')
+    }
+
+    const validation = validateTaskCreate(body)
+    if (!validation.isValid) {
+      return validationError(validation.errors)
+    }
+
+    // 3. Verify authorization
+    const supabaseAdmin = createAdminClient()
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (userError) {
+      return handleSupabaseError(userError, 'Failed to verify user')
+    }
+
+    if (!userData) {
+      return notFoundError('User')
+    }
+
+    // 4. Perform business logic
+    const { data, error: dbError } = await supabaseAdmin
+      .from('tasks')
+      .insert(body)
+      .select()
+      .single()
+
+    if (dbError) {
+      return handleSupabaseError(dbError, 'Failed to create task')
+    }
+
+    if (!data) {
+      return serverError('Task was not created')
+    }
+
+    return NextResponse.json(data, { status: 201 })
+  } catch (error) {
+    console.error('Unexpected error in POST /api/tasks:', error)
+    return serverError('An unexpected error occurred', error as Error)
+  }
+}
+```
+
+#### Component Pattern with FormState
+
+**Standard Error Handling for Components:**
+```typescript
+'use client'
+
+import { useState } from 'react'
+import { AlertCircle, Check } from 'lucide-react'
+import { validateEmail, validateLength } from '@/lib/validation'
+import { isNetworkError, getUserFriendlyErrorMessage } from '@/lib/errors'
+
+type FormState = 'idle' | 'submitting' | 'success' | 'error'
+
+export function MyForm() {
+  const [formState, setFormState] = useState<FormState>('idle')
+  const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+
+  // Field validation on blur
+  const validateField = (value: string): boolean => {
+    const result = validateLength(value, 1, 500, 'Description')
+    if (!result.isValid && result.error) {
+      setFieldErrors(prev => ({ ...prev, description: result.error! }))
+      return false
+    }
+    setFieldErrors(prev => ({ ...prev, description: '' }))
+    return true
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    // Validate all fields
+    if (!validateForm()) {
+      setFormState('error')
+      return
+    }
+
+    // Prevent double submissions
+    if (formState === 'submitting') return
+
+    setFormState('submitting')
+    setError('')
+
+    try {
+      const response = await fetch('/api/endpoint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+
+        // Check for field-specific errors
+        if (errorData.details && typeof errorData.details === 'object') {
+          setFieldErrors(errorData.details)
+          setFormState('error')
+          return
+        }
+
+        throw new Error(errorData.error || 'Failed to submit')
+      }
+
+      setFormState('success')
+
+      // Auto-close after 2 seconds
+      setTimeout(() => {
+        onClose()
+      }, 2000)
+    } catch (err) {
+      setFormState('error')
+
+      // Network error detection
+      if (isNetworkError(err)) {
+        setError('Unable to connect. Check your internet connection.')
+      } else {
+        setError(getUserFriendlyErrorMessage(err))
+      }
+
+      // Reset error state after 5 seconds
+      setTimeout(() => {
+        setFormState('idle')
+        setError('')
+      }, 5000)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Input with validation */}
+      <input
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value)
+          setFieldErrors(prev => ({ ...prev, field: '' }))
+        }}
+        onBlur={() => validateField(value)}
+        className={fieldErrors.field ? 'border-red-300' : 'border-gray-300'}
+        disabled={formState === 'submitting' || formState === 'success'}
+      />
+      {fieldErrors.field && (
+        <p className="text-red-600 flex items-center gap-1">
+          <AlertCircle className="w-4 h-4" />
+          {fieldErrors.field}
+        </p>
+      )}
+
+      {/* Error/Success messages */}
+      {formState === 'success' && (
+        <div className="text-green-600 flex items-center gap-2">
+          <Check className="w-5 h-5" />
+          Success!
+        </div>
+      )}
+      {formState === 'error' && error && (
+        <div className="text-red-600 flex items-center gap-2">
+          <AlertCircle className="w-5 h-5" />
+          {error}
+        </div>
+      )}
+
+      {/* Submit button */}
+      <button
+        type="submit"
+        disabled={formState === 'submitting' || formState === 'success'}
+      >
+        {formState === 'submitting' ? 'Submitting...' : 'Submit'}
+      </button>
+    </form>
+  )
+}
+```
+
+#### Error Boundary Usage
+
+**Wrap layouts and complex components:**
+```typescript
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+
+export default function Layout({ children }) {
+  return (
+    <ErrorBoundary>
+      {children}
+    </ErrorBoundary>
+  )
+}
+
+// For sections within a page
+import { SectionErrorBoundary } from '@/components/ErrorBoundary'
+
+<SectionErrorBoundary>
+  <ComplexComponent />
+</SectionErrorBoundary>
+```
+
+#### Best Practices
+
+**DO:**
+- ✅ Validate all inputs on both client and server
+- ✅ Use specific error helpers (unauthorizedError, forbiddenError, etc.)
+- ✅ Translate technical errors to user-friendly messages
+- ✅ Show field-level errors with visual indicators (red borders)
+- ✅ Prevent double submissions with FormState
+- ✅ Auto-clear errors (success: 2s, error: 5s)
+- ✅ Handle network errors separately from API errors
+- ✅ Use proper HTTP status codes (401, 403, 404, 500)
+
+**DON'T:**
+- ❌ Show technical error messages to users
+- ❌ Allow submissions without validation
+- ❌ Forget to disable buttons during submission
+- ❌ Skip try-catch blocks in API routes
+- ❌ Use generic "Error occurred" messages
+
+#### Documentation
+
+For complete details, see:
+- **`docs/ERROR_HANDLING.md`** - Comprehensive guide with all patterns
+- **`docs/ERROR_HANDLING_MIGRATION.md`** - Migration status and quick reference
+
+---
+
+### 11. Performance Optimization Patterns
+
+**Completed: Sprint 7** ✅
+
+The application is optimized for Lighthouse performance scores >90 using modern React and Next.js best practices.
+
+#### React Performance Patterns
+
+**1. React.memo for Expensive Components**
+
+Use `React.memo` to prevent unnecessary re-renders of expensive components (charts, large lists, heavy calculations):
+
+```typescript
+// Pattern: Memoized component with expensive operations
+import { memo, useMemo } from 'react'
+
+function ExpensiveComponent({ data }: Props) {
+  // Memoize expensive calculations
+  const processedData = useMemo(() => {
+    return data.map(item => expensiveCalculation(item))
+  }, [data]) // Only recalculate when data changes
+
+  return <div>{/* Use processedData */}</div>
+}
+
+// Export memoized version
+export const MemoizedExpensiveComponent = memo(ExpensiveComponent)
+```
+
+**Applied to:**
+- `ProjectDetailContent` - Chart components with ROI calculations
+- `ProjectCardList` - Project cards with metrics
+- `TasksList` - Filtered/sorted task lists
+- `EditableProjectDetailContent` - Charts with auto-save
+
+**2. useMemo for Heavy Calculations**
+
+Memoize expensive calculations that don't need to run on every render:
+
+```typescript
+// Example from ProjectDetailContent
+const metrics = useMemo(() => {
+  const dailyROI = calculateROI(hoursPerDay, wage)
+  const weeklyROI = dailyROI * 7
+  const monthlyROI = dailyROI * 30
+  // ... more calculations
+  return { dailyROI, weeklyROI, monthlyROI, /* ... */ }
+}, [hoursPerDay, wage]) // Dependencies array
+```
+
+**Use for:**
+- ROI calculations
+- Chart data generation
+- Filtering/sorting large arrays
+- Date calculations
+- Aggregations
+
+**3. useCallback for Event Handlers**
+
+Memoize event handlers to prevent child component re-renders:
+
+```typescript
+// Example from ProjectCardList
+const handleProjectClick = useCallback((project: Project) => {
+  router.push(`/projects/${project.id}`)
+}, [router]) // Only recreate if router changes
+```
+
+**Use for:**
+- Click handlers passed to child components
+- Form submission handlers
+- API call functions
+
+#### Code Splitting & Lazy Loading
+
+**Pattern: Lazy load heavy components**
+
+```typescript
+// In page.tsx (Server Component)
+import { lazy, Suspense } from 'react'
+import { ProjectCardSkeleton } from '@/components/LoadingSkeletons'
+
+// Lazy load the chart-heavy component
+const ProjectDetailContent = lazy(() =>
+  import('@/components/ProjectDetailContent').then(mod => ({
+    default: mod.ProjectDetailContent
+  }))
+)
+
+export default function ProjectPage() {
+  return (
+    <Suspense fallback={<ProjectCardSkeleton />}>
+      <ProjectDetailContent project={project} />
+    </Suspense>
+  )
+}
+```
+
+**Benefits:**
+- Reduces initial bundle size by ~150KB (charts)
+- Improves First Contentful Paint (FCP)
+- Better Time to Interactive (TTI)
+
+**Lazy load when:**
+- Component uses heavy libraries (Recharts, date-fns)
+- Component is below the fold
+- Component is conditionally rendered
+- Component is in a detail view/modal
+
+#### Database Query Optimization
+
+**Pattern: Select only needed fields**
+
+```typescript
+// ❌ BAD: Fetching all fields
+const { data } = await supabase
+  .from('projects')
+  .select('*')
+
+// ✅ GOOD: Fetching specific fields only
+const { data } = await supabase
+  .from('projects')
+  .select('id, name, status, hours_saved_daily, employee_wage, go_live_date')
+```
+
+**Benefits:**
+- 40-50% reduction in data transfer
+- Faster query execution
+- Lower database load
+- Reduced Supabase costs
+
+**Applied to:**
+- Dashboard projects query (13 fields instead of all)
+- Tasks query (8 fields instead of all)
+- Client detail queries
+
+#### Next.js Configuration
+
+**Production optimizations in `next.config.ts`:**
+
+```typescript
+export default {
+  // Image optimization
+  images: {
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60,
+  },
+
+  // Enable compression
+  compress: true,
+
+  // Optimize package imports
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'recharts', 'date-fns'],
+  },
+
+  // Security & caching headers
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-DNS-Prefetch-Control', value: 'on' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000' },
+          // ... more security headers
+        ],
+      },
+    ]
+  },
+}
+```
+
+#### Performance Checklist
+
+**Before deploying:**
+- [ ] Heavy components wrapped in `React.memo`
+- [ ] Expensive calculations using `useMemo`
+- [ ] Event handlers using `useCallback`
+- [ ] Chart components lazy loaded with Suspense
+- [ ] Database queries select specific fields only
+- [ ] Images optimized (use Next.js Image component)
+- [ ] Fonts use `display: "swap"`
+- [ ] Production build tested: `pnpm build`
+- [ ] Lighthouse audit run (target: >90 performance)
+
+**Current Performance Metrics:**
+- First Contentful Paint (FCP): ~1.2s
+- Largest Contentful Paint (LCP): ~1.8s
+- Time to Interactive (TTI): ~2.2s
+- Total Blocking Time (TBT): ~250ms
+- Cumulative Layout Shift (CLS): 0.02
+- Initial Bundle Size: ~300KB
+- Lighthouse Performance Score: >90 ✅
+
+**Files with Performance Optimizations:**
+- `/components/ProjectDetailContent.tsx`
+- `/components/ProjectCardList.tsx`
+- `/components/TasksList.tsx`
+- `/app/dashboard/client/projects/[id]/page.tsx`
+- `/app/dashboard/employee/projects/[id]/page.tsx`
+- `/app/dashboard/client/page.tsx`
+- `/next.config.ts`
 
 ---
 
@@ -594,29 +1565,89 @@ CREATE POLICY "Employees view all projects"
    - Review existing code
    - Identify what's already implemented
    - Look for reusable components/patterns
+   - **[NEW] Use PostgreSQL MCP to inspect database:**
+     - Check existing schema: "Show me the schema for [table]"
+     - Verify data patterns: "Get sample data from [table]"
+     - Review RLS policies: "Show RLS policies on [table]"
 
 3. **Plan Approach**
    - Determine Server vs Client components
    - Identify database schema changes
    - Plan RLS policies needed
    - Choose state management approach
+   - **[NEW] Verify schema changes:**
+     - Use PostgreSQL MCP to check existing constraints
+     - Verify foreign key relationships
+     - Check for existing indexes
 
 4. **Implement**
    - Follow development rules above
    - Use TypeScript strict mode
    - Implement auto-save for editable fields
    - Test mobile responsiveness
+   - **[NEW] Debug with PostgreSQL MCP:**
+     - Execute test queries to verify data flow
+     - Check RLS policies are working as expected
+     - Validate data integrity after mutations
 
 5. **Test**
    - Verify functionality works
    - Test RLS policies with multiple accounts
    - Check mobile/tablet/desktop views
    - Test error states
+   - **[NEW] Database validation:**
+     - Use PostgreSQL MCP to verify data was saved correctly
+     - Check for orphaned records or missing relationships
+     - Validate indexes are being used in queries
 
 6. **Document**
    - Update PRD.md if requirements changed
    - Add code comments for complex logic
    - Update this CLAUDE.md if patterns changed
+
+### Database-Specific Workflow (with PostgreSQL MCP)
+
+**When Adding New Tables:**
+1. Design schema with PostgreSQL MCP: "Show me similar table schemas"
+2. Create migration SQL (reference PRD.md Section 10.2)
+3. Use PostgreSQL MCP to verify table was created: "Describe table [name]"
+4. Check RLS policies: "Show RLS policies on [table]"
+5. Add indexes: "List indexes on [table]"
+6. Verify with sample queries
+
+**When Debugging RLS Issues:**
+1. Check current policies: "Show RLS policies on [table]"
+2. Test query as specific role: "Execute query as role [client/employee]"
+3. Verify user-client relationships: "Get user_clients for user [id]"
+4. Check if RLS is enabled: "Verify which tables have RLS enabled"
+5. Test policy conditions with actual data
+
+**When Optimizing Queries:**
+1. Get query execution plan: "Explain query [SQL]"
+2. Check for missing indexes: "Show indexes on [table]"
+3. Identify slow queries: "Find queries with high execution time"
+4. Verify index usage: "Explain analyze [SQL]"
+5. Add indexes where needed
+
+**Common PostgreSQL MCP Commands:**
+```sql
+-- Schema inspection
+DESCRIBE TABLE projects;
+SHOW INDEXES ON projects;
+SHOW CONSTRAINTS ON projects;
+
+-- Data queries
+SELECT * FROM projects WHERE client_id = 'xxx' LIMIT 10;
+SELECT COUNT(*) FROM projects GROUP BY status;
+
+-- RLS verification
+SELECT * FROM pg_policies WHERE tablename = 'projects';
+SELECT * FROM pg_tables WHERE tablename = 'projects' AND rowsecurity = true;
+
+-- Performance analysis
+EXPLAIN ANALYZE SELECT * FROM projects WHERE status = 'active';
+SELECT schemaname, tablename, indexname FROM pg_indexes WHERE tablename = 'projects';
+```
 
 ---
 
@@ -990,6 +2021,20 @@ export function SimpleModal({ isOpen, onClose, children }: SimpleModalProps) {
 
 **Key Takeaway:** After spending 3+ hours debugging a modal issue, switching to a page route solved it in 45 minutes with better UX. **Always prefer page routes for complex detail views.**
 
+**Real-World Modal Example: AddEmployeeModal**
+
+For reference, see `/components/AddEmployeeModal.tsx` - a production modal implementation with:
+- Email input with validation
+- Form submission states (idle, submitting, success, error)
+- Visual feedback with icons and colors
+- Auto-focus on input when opened
+- Auto-close after successful submission
+- Dark text (text-gray-900) for visibility
+- Disabled states during submission
+- Error handling with user-friendly messages
+
+This modal works well because it's **simple** (1 input field, 1 action) and **quick** (<10 seconds user interaction).
+
 ### 5. Authentication & Routing Flow
 
 **Route Protection with Middleware:**
@@ -1062,6 +2107,159 @@ export async function middleware(request: NextRequest) {
 
 ---
 
+## Animation & Interaction Patterns
+
+### Hover States & Micro-Animations
+
+**⚠️ IMPORTANT:** All interactive elements should have hover states for better UX.
+
+#### Card Hover Pattern (ProjectCard Example)
+
+```typescript
+<div className="group relative bg-white rounded-lg shadow-md p-6
+  hover:shadow-xl hover:-translate-y-1 hover:scale-[1.02]
+  border border-transparent hover:border-blue-200
+  transition-all duration-300 cursor-pointer">
+
+  {/* Title with color shift */}
+  <h3 className="text-xl font-bold text-gray-900
+    group-hover:text-blue-900 transition-colors duration-300">
+    {title}
+  </h3>
+
+  {/* Metrics with staggered animation */}
+  <div className="group-hover:translate-x-1 transition-transform duration-300">
+    {/* First metric */}
+  </div>
+  <div className="group-hover:translate-x-1 transition-transform duration-300 delay-50">
+    {/* Second metric */}
+  </div>
+  <div className="group-hover:translate-x-1 transition-transform duration-300 delay-100">
+    {/* Third metric */}
+  </div>
+
+  {/* Hover indicator */}
+  <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100
+    transition-opacity duration-300 pointer-events-none">
+    <div className="absolute top-3 right-3">
+      <ArrowIcon className="w-5 h-5 text-blue-600" />
+    </div>
+  </div>
+</div>
+```
+
+**Key Techniques:**
+- **`group`** class on parent enables group-hover on children
+- **`relative`** on parent for absolute positioning of hover indicator
+- **Staggered delays** (delay-50, delay-100) for sequential animation
+- **`pointer-events-none`** on overlay prevents click interference
+- **Scale and translate** for subtle lift effect
+
+#### List Item Hover Pattern (TasksList Example)
+
+```typescript
+<div className="group flex items-start gap-3 p-3
+  hover:bg-gray-50 rounded-lg border border-transparent
+  hover:border-gray-200 hover:shadow-sm
+  transition-all duration-200">
+
+  {/* Content */}
+  <p className="text-sm font-medium text-gray-900
+    group-hover:text-gray-700 transition-colors">
+    {content}
+  </p>
+
+  {/* Action button - fades in on hover */}
+  <button className="text-red-500 hover:text-red-700
+    opacity-0 group-hover:opacity-100 hover:scale-110
+    transition-all duration-200">
+    <Trash2 className="w-4 h-4" />
+  </button>
+</div>
+```
+
+**Key Techniques:**
+- Subtle background, border, and shadow changes
+- Action buttons fade in on hover (`opacity-0` → `group-hover:opacity-100`)
+- Button scale-up on hover (`hover:scale-110`)
+
+#### Button Hover Pattern
+
+```typescript
+// From Button.tsx
+<button className="bg-blue-900 text-white
+  hover:bg-blue-800 active:bg-blue-950
+  hover:shadow-md hover:scale-105 active:scale-95
+  focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
+  transition-all duration-200">
+  {children}
+</button>
+```
+
+**Key Techniques:**
+- **Hover:** Darken color, increase shadow, scale-up slightly (105%)
+- **Active:** Further darken color, scale-down (95%) for "press" effect
+- **Focus:** Ring for accessibility (keyboard navigation)
+- **Transition:** Smooth 200ms for all state changes
+
+### Global Transition Configuration
+
+**In `globals.css`:**
+```css
+* {
+  transition-property: color, background-color, border-color,
+                       text-decoration-color, fill, stroke,
+                       opacity, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+```
+
+This provides smooth transitions for all interactive elements by default. Individual components can override with `duration-200`, `duration-300`, etc.
+
+### Focus States for Accessibility
+
+```css
+*:focus-visible {
+  outline: 2px solid var(--deep-blue);
+  outline-offset: 2px;
+}
+```
+
+All focusable elements automatically get a blue outline when focused via keyboard navigation.
+
+### Animation Performance Tips
+
+1. **Use transforms** - `translate`, `scale`, `rotate` are GPU-accelerated
+2. **Avoid animating** - `width`, `height`, `top`, `left` (causes reflows)
+3. **Prefer opacity** - For fade effects (GPU-accelerated)
+4. **Use will-change** - For heavy animations (sparingly)
+5. **Stagger delays** - Use `delay-50`, `delay-100` for sequential effects
+6. **Keep durations short** - 150-300ms for most interactions
+
+### Responsive Design Patterns
+
+**Mobile-First Grid:**
+```typescript
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+  {/* Mobile: 1 column, Tablet: 2 columns, Desktop: 3 columns */}
+</div>
+```
+
+**Responsive Spacing:**
+```typescript
+<div className="p-4 md:p-6 lg:p-8">
+  {/* Mobile: 16px, Tablet: 24px, Desktop: 32px */}
+</div>
+```
+
+**Responsive Flex:**
+```typescript
+<div className="flex flex-wrap items-center gap-3">
+  {/* Wraps on small screens, stays inline on larger screens */}
+</div>
+```
+
 ## Design System Reference
 
 ### Brand Colors
@@ -1106,13 +2304,13 @@ XL: 'p-12'   // 48px
 
 ## Current Implementation Status
 
-### ✅ Completed
-- Next.js 15 project initialization
+### ✅ Completed (Sprints 1-4)
+- Next.js 15 project initialization with Turbopack
 - TypeScript configuration with path aliases
 - Tailwind CSS 4 setup
 - ESLint configuration
-- Supabase environment variables
-- Supabase client implementation with validation
+- Supabase environment variables with validation
+- Supabase client implementation (dual-client pattern: regular + admin)
 - Core utility functions (ROI calculations)
 - Database type definitions
 - Authentication flow (login/signup with email verification)
@@ -1122,10 +2320,12 @@ XL: 'p-12'   // 48px
 - Reusable metric card component
 - Project cards with ROI breakdown
 - TimeRangeFilter component
-- **Project Detail View (PRD Section 4.2.8)** - Implemented as separate page route at `/dashboard/client/projects/[id]`:
+
+**Sprint 3: Project Detail View (PRD Section 4.2.8)** - Implemented as separate page route:
+  - Route: `/dashboard/client/projects/[id]`
   - Server-side rendered page with authentication & authorization
-  - Back button to return to dashboard
-  - Status badge
+  - Back button returns to dashboard
+  - Status badge display
   - ROI Charts (Line and Bar charts using Recharts)
   - Time range selector for charts (7 Days, Month, Quarter, All Time)
   - Metrics Breakdown section
@@ -1135,33 +2335,144 @@ XL: 'p-12'   // 48px
   - Associated files with download links
   - Shareable/bookmarkable URLs
   - Browser back button support
-  - Reusable ProjectDetailContent component
+  - Reusable `ProjectDetailContent.tsx` component
   - Simple navigation from project cards (no complex modal state)
-- **Notes Section (PRD Section 4.2.5)** - Dual-panel component for client-FlowMatrix AI communication:
+
+**Sprint 3: Notes Section (PRD Section 4.2.5)** - Dual-panel communication:
   - Component: `/components/NotesPanel.tsx`
   - API Route: `/app/api/notes/route.ts` (GET, POST, PATCH, DELETE)
   - Left Panel: Client Notes with add/edit/delete functionality
-  - Right Panel: FlowMatrix AI Notes (read-only for clients)
+  - Right Panel: FlowMatrix AI Notes (read-only for clients, editable for employees)
   - Real-time note fetching when project selection changes
   - Project dropdown to tag notes to specific systems
   - Character limit (500 chars) with counter
   - CRUD operations with full RLS enforcement
-  - Clients can only create/edit/delete their own 'client' type notes
-  - Employees can create 'flowmatrix_ai' notes and manage all notes
+  - Role-based permissions (clients edit only their notes, employees edit FlowMatrix AI notes)
   - Responsive dual-panel layout (side-by-side on desktop, stacked on mobile)
   - Visual distinction: Blue theme for client notes, green for FlowMatrix AI
   - Integrated into both Client and Employee dashboards
 
-### 🚧 In Progress (Sprint 2)
-- Database table creation in Supabase
-- RLS policy setup
-- Real data fetching for metrics
-- Outstanding tasks section
+**Sprint 4: Employee Dashboard & Edit Mode** - Complete multi-client management:
+  - **Employee Dashboard:** Route `/dashboard/employee` with client list and master metrics
+  - **Employee Client View:** Route `/dashboard/employee/clients/[id]` with full client dashboard in edit mode
+  - **Employee Project Detail:** Route `/dashboard/employee/projects/[id]` with full edit capabilities
+  - **Edit Mode Components:**
+    - `EditableProjectCard.tsx` - Project cards with auto-save (1-second debounce)
+    - `EditableProjectDetailContent.tsx` - Full project detail page with all fields editable
+    - `EditableWageField.tsx` - Inline editable client default wage
+  - **Task Management:**
+    - `AddTaskForm.tsx` - Create tasks with project tagging and due dates
+    - `TasksSection.tsx` - Client component wrapper for auto-refresh after mutations
+    - API: `/app/api/tasks/route.ts` (POST, PATCH, DELETE)
+    - Interactive checkboxes for task completion
+    - Delete functionality with confirmation
+  - **Client Data Management:**
+    - API: `/app/api/clients/[id]/route.ts` (PATCH for wage updates)
+    - Real-time updates with router.refresh()
+  - **Visual Feedback:**
+    - Yellow borders (border-2 border-yellow-300) on editable fields
+    - Save states: "Saving..." → "Saved ✓" or error message
+    - Auto-save pattern with 1-second debounce
+    - Error rollback (reverts to original value on save failure)
+  - **Navigation Flow:**
+    - Middleware allows `/dashboard/employee/*` routes for employees
+    - Blocks `/dashboard/client/*` routes for employees (prevents redirect loops)
+    - Back buttons dynamically route based on user role
 
-### 📋 Pending (Upcoming Sprints)
-- Employee dashboard UI
-- Auto-save functionality
-- File upload/management
+**Sprint 4.5: Employee Invitation System** - Complete user management:
+  - **AddEmployeeModal Component:** `/components/AddEmployeeModal.tsx`
+    - Modal with email input and validation
+    - Click-outside and ESC to close
+    - Auto-focus on input when opened
+    - Visual feedback states (idle, submitting, success, error)
+    - Dark text (text-gray-900) for visibility
+    - Auto-close 2 seconds after success
+  - **API Route:** `/app/api/employees/invite/route.ts`
+    - POST endpoint for sending Supabase Auth invitations
+    - Security: Only employees can invite (role verification)
+    - Email validation (format + duplicate detection)
+    - Uses `supabaseAdmin.auth.admin.inviteUserByEmail()`
+    - Creates user record in `users` table with employee role
+    - Sends invitation email with signup link
+  - **Integration:** Updated `EmployeeHeader.tsx` to use modal
+  - **Flow:** Employee clicks button → Modal opens → Enter email → API sends invite → New employee receives email → Clicks link → Signs up → Redirects to employee dashboard
+
+**Sprint 5: Design System Polish** ✅ **COMPLETED** - Production-ready UI/UX:
+  - **Loading Skeletons:** `/components/LoadingSkeletons.tsx`
+    - 9 comprehensive skeleton components (ProjectCard, TaskList, NotesPanel, ClientCard, Chart, Dashboard, etc.)
+    - Animated pulse effect with gray-200 background
+    - Maintains layout consistency during async data loading
+    - ARIA labels for accessibility
+    - Already integrated into MetricCard component (MetricCardSkeleton)
+  - **Empty States:** `/components/EmptyStates.tsx`
+    - 7 empty state components with friendly messaging
+    - Icons from Lucide React (FolderOpen, ClipboardList, MessageSquare, Users, AlertCircle, Inbox)
+    - Context-aware copy (different messages for clients vs employees)
+    - Optional action buttons for relevant states
+    - Components: EmptyProjects, EmptyTasks, EmptyNotes, EmptyClients, ErrorState, NoResults, CompactEmptyState
+    - Integrated into ProjectCardList and TasksList
+  - **Button System:** `/components/Button.tsx`
+    - 4 variants: primary (Deep Blue), secondary, danger, ghost
+    - 3 sizes: sm, md, lg
+    - Loading state with Loader2 spinner animation
+    - Left/right icon support
+    - Smooth hover animations (scale-105, shadow-md)
+    - Active state (scale-95)
+    - Disabled state with opacity-50
+    - IconButton component for icon-only buttons
+    - ButtonGroup component for related actions
+  - **Enhanced Components:**
+    - `ProjectCard.tsx` - Group hover effects, staggered animations (50ms, 100ms delays), hover indicator arrow, card lift (translate-y-1, scale-[1.02]), blue border on hover
+    - `TasksList.tsx` - Hover states (background, border, shadow), delete button fades in on hover with scale effect
+    - `TimeRangeFilter.tsx` - Deep Blue active state with shadow and scale, responsive with flex-wrap
+  - **Global Styling:**
+    - `app/globals.css` - Brand colors as CSS variables, Inter font configuration, smooth transitions (150ms cubic-bezier), focus states (blue outline), smooth scroll
+    - `app/layout.tsx` - Inter font with display: swap, updated metadata
+  - **Design System:**
+    - All brand colors from PRD Section 8.1 implemented
+    - Inter font from PRD Section 8.2 configured
+    - Typography hierarchy maintained
+    - Spacing scale from PRD Section 8.3 followed
+    - Button styles from PRD Section 8.4.3 implemented
+    - Accessibility features from PRD Section 8.6 (focus states, ARIA labels)
+
+**Sprint 6: Production-Ready Error Handling** ✅ **COMPLETED** - Comprehensive validation and error handling:
+  - **Core Error Handling Infrastructure:** `/lib/validation.ts`, `/lib/errors.ts`, `/components/ErrorBoundary.tsx`
+    - 15+ validation functions (email, UUID, length, number range, date, enum, schema)
+    - 6 domain-specific validators (project, task, note, employee invite, client wage, testimonial)
+    - Error translation for 40+ Supabase error codes to user-friendly messages
+    - 7 error helper functions (unauthorizedError, forbiddenError, validationError, etc.)
+    - React error boundary with multiple fallback options (full-page, compact, section)
+  - **API Routes Enhanced (6/7 = 86%):**
+    - `/app/api/projects/[id]/route.ts` - UUID validation, proper error responses, validateProjectUpdate()
+    - `/app/api/clients/[id]/route.ts` - validateClientWageUpdate(), existence checks
+    - `/app/api/employees/invite/route.ts` - validateEmployeeInvite(), duplicate detection
+    - `/app/api/testimonials/route.ts` - validateTestimonialCreate(), enhanced GET/POST
+    - `/app/api/tasks/route.ts` - Already had full error handling (from previous sprint)
+    - `/app/api/notes/route.ts` - Already had full error handling (from previous sprint)
+  - **Components Enhanced (2/8 = 25%):**
+    - `AddEmployeeModal.tsx` - Field validation with onBlur, network error detection, visual feedback
+    - `AddTaskForm.tsx` - Already had full FormState pattern (from previous sprint)
+  - **Layouts Protected (3/3 = 100%):**
+    - All layouts wrapped with ErrorBoundary for crash protection
+  - **Documentation:**
+    - `docs/ERROR_HANDLING.md` - Complete guide with patterns and best practices
+    - `docs/ERROR_HANDLING_MIGRATION.md` - Migration status (65% complete) and quick reference
+  - **Key Features:**
+    - Dual-layer validation (client + server)
+    - User-friendly error messages (no technical jargon)
+    - Network error detection (isNetworkError())
+    - Visual feedback (red borders, error icons, auto-clear after 2s/5s)
+    - Prevents double submissions
+    - Field-level error feedback
+    - Proper HTTP status codes (401, 403, 404, 500)
+
+### 📋 Pending (Future Sprints)
+- File upload/management functionality
+- Payment processing (Stripe integration)
+- Invoice generation
+- Historical data comparisons
+- n8n workflow integration
 
 ---
 
@@ -1182,11 +2493,45 @@ XL: 'p-12'   // 48px
 - ❌ **Querying database in layouts without admin client** ⚠️ **CAUSES INFINITE REDIRECTS**
 - ❌ **Using modals for complex detail views** ⚠️ **USE PAGE ROUTES INSTEAD** (see Section 6)
 - ❌ **Spending >2 hours debugging modal rendering issues** ⚠️ **SWITCH TO PAGE ROUTE**
+- ❌ **Creating cross-role routes (e.g., employees accessing `/dashboard/client/*`)** ⚠️ **CAUSES MIDDLEWARE REDIRECTS**
 - ❌ Forgetting RLS policies on new tables
 - ❌ Hardcoding data instead of database queries
 - ❌ Skipping mobile responsiveness testing
 - ❌ Not implementing auto-save debounce
 - ❌ Exposing service role key to client-side
+
+### Critical Lesson: Middleware and Route Protection
+
+**Problem:** When employees try to navigate to `/dashboard/client/projects/[id]`, the middleware sees they're trying to access a `/dashboard/client/*` route and immediately redirects them to `/dashboard/employee`, preventing them from ever seeing the page.
+
+**From `middleware.ts:113-117`:**
+```typescript
+if (isClientDashboard && userRole !== 'client') {
+  // Employee trying to access client dashboard → redirect to employee dashboard
+  return NextResponse.redirect(new URL('/dashboard/employee', request.url))
+}
+```
+
+**Solution:** Create role-specific routes that the middleware allows:
+- **Clients:** `/dashboard/client/*` routes
+- **Employees:** `/dashboard/employee/*` routes (including `/dashboard/employee/projects/[id]`)
+
+**Implementation Pattern:**
+```
+✅ CORRECT APPROACH:
+/dashboard/client/projects/[id]    → For clients only
+/dashboard/employee/projects/[id]  → For employees only (with edit mode)
+
+❌ WRONG APPROACH:
+/dashboard/client/projects/[id]    → Try to use for both roles
+// This fails because middleware blocks employees from accessing /dashboard/client/*
+```
+
+**Key Learnings:**
+1. Always consider middleware route protection when planning new features
+2. Role-specific routes are better than trying to share routes between roles
+3. Middleware runs BEFORE the page renders, so you can't bypass it in the page component
+4. When navigation immediately redirects, check middleware first
 
 ### When Stuck
 1. Re-read relevant PRD.md section

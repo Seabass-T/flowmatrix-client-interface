@@ -7,14 +7,16 @@
  * Features:
  * - FlowMatrix AI logo
  * - Employee email display
- * - Add Employee button (TODO: implement modal)
+ * - Add Employee button with modal
  * - Logout button
  */
 
 'use client'
 
+import { useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
+import { AddEmployeeModal } from './AddEmployeeModal'
 
 interface EmployeeHeaderProps {
   email: string
@@ -22,10 +24,14 @@ interface EmployeeHeaderProps {
 
 export function EmployeeHeader({ email }: EmployeeHeaderProps) {
   const router = useRouter()
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   const handleAddEmployee = () => {
-    // TODO: Implement Add Employee modal
-    alert('Add Employee functionality coming soon!')
+    setIsModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false)
   }
 
   const handleLogout = async () => {
@@ -44,40 +50,45 @@ export function EmployeeHeader({ email }: EmployeeHeaderProps) {
   }
 
   return (
-    <div className="bg-white border-b shadow-sm">
-      <div className="max-w-7xl mx-auto px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Image
-              src="/flowmatrix-logo.png"
-              alt="FlowMatrix AI"
-              width={40}
-              height={40}
-              className="rounded"
-            />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Employee Portal</h1>
-              <p className="text-sm text-gray-600">{email}</p>
+    <>
+      <div className="bg-white border-b shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Image
+                src="/flowmatrix-logo.png"
+                alt="FlowMatrix AI"
+                width={40}
+                height={40}
+                className="rounded"
+              />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Employee Portal</h1>
+                <p className="text-sm text-gray-600">{email}</p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleAddEmployee}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
-            >
-              Add Employee
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleAddEmployee}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                Add Employee
+              </button>
 
-            <button
-              onClick={handleLogout}
-              className="text-gray-600 hover:text-gray-900 font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              Logout
-            </button>
+              <button
+                onClick={handleLogout}
+                className="text-gray-600 hover:text-gray-900 font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Add Employee Modal */}
+      <AddEmployeeModal isOpen={isModalOpen} onClose={handleCloseModal} />
+    </>
   )
 }

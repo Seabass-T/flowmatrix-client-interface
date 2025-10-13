@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { redirect } from 'next/navigation'
 import { Header } from '@/components/Header'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 /**
  * Client Dashboard Layout
@@ -74,18 +75,20 @@ export default async function ClientDashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <Header
-        clientName={clientName}
-        userName={userData?.email}
-        userRole="client"
-      />
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <Header
+          clientName={clientName}
+          userName={userData?.email}
+          userRole="client"
+        />
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {children}
-      </main>
-    </div>
+        {/* Main Content */}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {children}
+        </main>
+      </div>
+    </ErrorBoundary>
   )
 }

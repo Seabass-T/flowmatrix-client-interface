@@ -15,7 +15,7 @@ import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { redirect } from 'next/navigation'
 import { MasterMetrics } from '@/components/MasterMetrics'
-import { ClientAccountCard } from '@/components/ClientAccountCard'
+import { ClientCard } from '@/components/ClientCard'
 import { EmployeeHeader } from '@/components/EmployeeHeader'
 import { calculateROI, calculateTotalHoursSaved } from '@/lib/calculations'
 
@@ -203,9 +203,9 @@ export default async function EmployeeDashboard() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {clientMetrics.map((client) => (
-                <ClientAccountCard key={client.id} {...client} />
+                <ClientCard key={client.id} {...client} />
               ))}
             </div>
           )}

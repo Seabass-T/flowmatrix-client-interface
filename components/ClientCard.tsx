@@ -1,10 +1,36 @@
 /**
- * Client Account Card Component
+ * Client Card Component (PRD Section 4.3.4)
  *
- * Displays client summary information for Employee Dashboard.
- * Shows: Active workflows, uncompleted tasks, new client notes, total ROI
+ * Displays client account summary for Employee Dashboard.
+ * Shows: Active Workflows, Uncompleted Tasks, New Notes indicator, Total ROI,
+ * Payment Status (hardcoded for MVP), Total Revenue (hardcoded $0)
  *
- * Location: Employee Dashboard Client List (PRD Section 4.3.4)
+ * Features:
+ * - Responsive card layout with hover effects
+ * - 'View Dashboard' button navigates to client dashboard with edit mode enabled
+ * - Red indicator (🔴) for new/unread client notes
+ * - Payment status badge (Paid ✓, Overdue ⚠️, Pending ⏳)
+ *
+ * Usage:
+ * ```tsx
+ * <ClientCard
+ *   id={client.id}
+ *   companyName="UBL Group"
+ *   activeWorkflows={3}
+ *   uncompletedTasks={2}
+ *   newClientNotes={1}
+ *   totalROI={2418}
+ *   paymentStatus="paid"
+ *   totalRevenue={0}
+ * />
+ * ```
+ *
+ * Grid Layout (Parent Container):
+ * ```tsx
+ * <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+ *   {clients.map(client => <ClientCard key={client.id} {...client} />)}
+ * </div>
+ * ```
  */
 
 'use client'
@@ -12,7 +38,7 @@
 import { formatCurrency } from '@/lib/calculations'
 import { useRouter } from 'next/navigation'
 
-interface ClientAccountCardProps {
+interface ClientCardProps {
   id: string
   companyName: string
   activeWorkflows: number
@@ -29,7 +55,7 @@ const PAYMENT_STATUS_STYLES = {
   pending: { bg: 'bg-yellow-100', text: 'text-yellow-800', icon: '⏳' },
 }
 
-export function ClientAccountCard({
+export function ClientCard({
   id,
   companyName,
   activeWorkflows,
@@ -38,12 +64,12 @@ export function ClientAccountCard({
   totalROI,
   paymentStatus = 'paid',
   totalRevenue = 0,
-}: ClientAccountCardProps) {
+}: ClientCardProps) {
   const router = useRouter()
   const paymentStyle = PAYMENT_STATUS_STYLES[paymentStatus]
 
   const handleViewDashboard = () => {
-    // Navigate to client dashboard in edit mode
+    // Navigate to client dashboard with edit mode enabled (employee access)
     // Sprint 4: Full edit mode implementation (PRD Section 4.3.5)
     router.push(`/dashboard/employee/clients/${id}`)
   }
@@ -56,6 +82,7 @@ export function ClientAccountCard({
         <button
           onClick={handleViewDashboard}
           className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          aria-label={`View dashboard for ${companyName}`}
         >
           View Dashboard
         </button>

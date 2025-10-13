@@ -1,8 +1,35 @@
 @import "tailwindcss";
 
+/**
+ * FlowMatrix AI Brand Colors (PRD Section 8.1)
+ * Primary Palette: Deep Blue, Teal, Orange, Purple, Yellow
+ * Neutral Palette: Dark Gray, Medium Gray, Light Gray, White
+ * Status Colors: Active (Green), Dev (Blue), Proposed (Yellow), Inactive (Gray), Error (Red)
+ */
 :root {
+  /* Base colors */
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1F2937;
+
+  /* Brand Primary Colors */
+  --deep-blue: #1E3A8A;
+  --teal: #0D9488;
+  --orange: #F97316;
+  --purple: #9333EA;
+  --yellow: #FBBF24;
+
+  /* Neutral Colors */
+  --dark-gray: #1F2937;
+  --medium-gray: #6B7280;
+  --light-gray: #F3F4F6;
+  --white: #FFFFFF;
+
+  /* Status Colors */
+  --status-active: #10B981;
+  --status-dev: #3B82F6;
+  --status-proposed: #F59E0B;
+  --status-inactive: #6B7280;
+  --status-error: #EF4444;
 }
 
 @theme inline {
@@ -10,6 +37,12 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Custom brand color utilities */
+  --color-brand-blue: var(--deep-blue);
+  --color-brand-teal: var(--teal);
+  --color-brand-orange: var(--orange);
+  --color-brand-purple: var(--purple);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,8 +52,41 @@
   }
 }
 
+/**
+ * Typography (PRD Section 8.2)
+ * Font Family: Inter (Google Fonts) with fallbacks
+ * Font Sizes: H1-H4, Body, Small, Tiny
+ * Font Weights: Bold (700), Semibold (600), Medium (500), Regular (400)
+ */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/**
+ * Smooth transitions for all interactive elements
+ */
+* {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/**
+ * Focus states for accessibility (PRD Section 8.6)
+ */
+*:focus-visible {
+  outline: 2px solid var(--deep-blue);
+  outline-offset: 2px;
+}
+
+/**
+ * Smooth scroll behavior
+ */
+html {
+  scroll-behavior: smooth;
 }

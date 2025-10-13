@@ -132,8 +132,9 @@ export function NotesPanel({ projects, userId, userRole, initialNotes = [] }: No
       <div className="bg-white rounded-lg shadow-md p-6">
         <h3 className="text-xl font-bold text-gray-900 mb-4">Client Notes</h3>
 
-        {/* Add Note Form */}
-        <form onSubmit={handleAddNote} className="mb-6">
+        {/* Add Note Form (Clients Only) */}
+        {userRole === 'client' && (
+          <form onSubmit={handleAddNote} className="mb-6">
           <div className="mb-3">
             <label htmlFor="project-select" className="block text-sm font-medium text-gray-700 mb-1">
               Project
@@ -182,6 +183,7 @@ export function NotesPanel({ projects, userId, userRole, initialNotes = [] }: No
             {submitting ? 'Adding Note...' : 'Add Note'}
           </button>
         </form>
+        )}
 
         {/* Note Thread Display */}
         <div className="border-t border-gray-200 pt-4">
@@ -278,6 +280,59 @@ export function NotesPanel({ projects, userId, userRole, initialNotes = [] }: No
       <div className="bg-white rounded-lg shadow-md p-6">
         <h3 className="text-xl font-bold text-gray-900 mb-4">FlowMatrix AI Notes</h3>
 
+        {/* Add Note Form (Employees Only) */}
+        {userRole === 'employee' && (
+          <form onSubmit={handleAddNote} className="mb-6">
+            <div className="mb-3">
+              <label htmlFor="project-select-fm" className="block text-sm font-medium text-gray-700 mb-1">
+                Project
+              </label>
+              <select
+                id="project-select-fm"
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 text-gray-900"
+                required
+              >
+                <option value="">Select a project...</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-3">
+              <label htmlFor="note-content-fm" className="block text-sm font-medium text-gray-700 mb-1">
+                Note
+              </label>
+              <textarea
+                id="note-content-fm"
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                placeholder="Write your FlowMatrix AI note here..."
+                maxLength={500}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-none text-gray-900 placeholder:text-gray-400"
+                required
+              />
+              <div className="text-xs text-gray-500 mt-1">
+                {newNoteContent.length}/500 characters
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!selectedProjectId || !newNoteContent.trim() || submitting}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium px-4 py-2 rounded-md transition-colors duration-200 flex items-center justify-center gap-2"
+            >
+              <Send className="w-4 h-4" />
+              {submitting ? 'Adding Note...' : 'Add FlowMatrix AI Note'}
+            </button>
+          </form>
+        )}
+
         <div className="border-t border-gray-200 pt-4">
           {loading && (
             <div className="text-center text-gray-500 py-4">Loading notes...</div>
@@ -308,8 +363,59 @@ export function NotesPanel({ projects, userId, userRole, initialNotes = [] }: No
                         {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
                       </div>
                     </div>
+                    {canEditNote(note) && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingNoteId(note.id)
+                            setEditContent(note.content)
+                          }}
+                          className="text-green-600 hover:text-green-800"
+                          aria-label="Edit note"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteNote(note.id)}
+                          className="text-red-600 hover:text-red-800"
+                          aria-label="Delete note"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-gray-800 mt-2 whitespace-pre-wrap">{note.content}</p>
+
+                  {editingNoteId === note.id ? (
+                    <div className="mt-2">
+                      <textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-none text-gray-900"
+                        rows={3}
+                        maxLength={500}
+                      />
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => handleEditNote(note.id)}
+                          className="px-3 py-1 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingNoteId(null)
+                            setEditContent('')
+                          }}
+                          className="px-3 py-1 bg-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-gray-800 mt-2 whitespace-pre-wrap">{note.content}</p>
+                  )}
                 </div>
               ))}
             </div>

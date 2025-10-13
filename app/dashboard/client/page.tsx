@@ -146,9 +146,12 @@ VALUES ('${user.id}', 'paste-client-id-from-step-1');`}
     console.log('📊 Client Dashboard: clientId =', clientId)
 
     // 2. Fetch all projects for this client using ADMIN CLIENT (bypasses RLS)
-    const { data: projects, error: projectsError } = (await supabaseAdmin
+    // PERFORMANCE: Only select fields needed for dashboard cards and calculations
+    const { data: projects, error: projectsError} = (await supabaseAdmin
       .from('projects')
-      .select('*')
+      .select(
+        'id, name, status, hours_saved_daily, hours_saved_weekly, hours_saved_monthly, employee_wage, dev_cost, implementation_cost, monthly_maintenance, go_live_date, updated_at, client_id'
+      )
       .eq('client_id', clientId)
       .order('created_at', { ascending: false })) as { data: Project[] | null; error: { message?: string } | null }
 
@@ -160,11 +163,18 @@ VALUES ('${user.id}', 'paste-client-id-from-step-1');`}
     }
 
     // 3. Fetch all tasks for this client's projects
+    // PERFORMANCE: Only select fields needed for TasksList component
     const projectIds = projects?.map(p => p.id) || []
     const { data: tasks, error: tasksError } = await supabaseAdmin
       .from('tasks')
       .select(`
-        *,
+        id,
+        description,
+        is_completed,
+        due_date,
+        created_at,
+        completed_at,
+        project_id,
         project:projects!inner(id, name)
       `)
       .in('project_id', projectIds)

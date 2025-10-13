@@ -1,10 +1,16 @@
 import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { redirect, notFound } from 'next/navigation'
-import { ProjectDetailContent } from '@/components/ProjectDetailContent'
+import { lazy, Suspense } from 'react'
 import { ProjectWithRelations } from '@/types/database'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { ProjectCardSkeleton } from '@/components/LoadingSkeletons'
+
+// Lazy load the heavy ProjectDetailContent component (contains charts)
+const ProjectDetailContent = lazy(() =>
+  import('@/components/ProjectDetailContent').then((mod) => ({ default: mod.ProjectDetailContent }))
+)
 
 /**
  * Project Detail Page
@@ -15,11 +21,13 @@ import Link from 'next/link'
  * PRD Reference: Section 4.2.8 (Project Detail View)
  * Implementation: Using page route instead of modal for better reliability and UX
  *
+ * PERFORMANCE: Lazy loads ProjectDetailContent to reduce initial bundle size
+ *
  * Features:
  * - Server-side rendering for performance
  * - Back button to return to dashboard
  * - All project details with related data
- * - ROI charts and metrics
+ * - ROI charts and metrics (lazy loaded)
  * - Shareable URL
  */
 
@@ -66,12 +74,6 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   }
 
   // 3. Verify user has access to this project
-  const { data: userClient, error: userClientError } = (await supabaseAdmin
-    .from('user_clients')
-    .select('client_id')
-    .eq('user_id', user.id)
-    .single()) as { data: { client_id: string } | null; error: { message?: string } | null }
-
   const { data: userData, error: userError } = (await supabaseAdmin
     .from('users')
     .select('role')
@@ -79,9 +81,18 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
     .single()) as { data: { role: string } | null; error: { message?: string } | null }
 
   const isEmployee = userData && !userError ? userData.role === 'employee' : false
+  console.log('🔐 Project Detail Page: User role check - isEmployee:', isEmployee, 'userId:', user.id)
 
   // If not employee, verify client association
   if (!isEmployee) {
+    const { data: userClient, error: userClientError } = (await supabaseAdmin
+      .from('user_clients')
+      .select('client_id')
+      .eq('user_id', user.id)
+      .single()) as { data: { client_id: string } | null; error: { message?: string } | null }
+
+    console.log('🔐 Client user - checking user_clients association:', { userClient, userClientError })
+
     if (!userClient || userClientError) {
       console.warn('⚠️ User not associated with any client:', user.id)
       redirect('/dashboard/client')
@@ -91,9 +102,17 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       console.warn('⚠️ Unauthorized access attempt: User', user.id, 'tried to access project', id)
       redirect('/dashboard/client')
     }
+  } else {
+    console.log('✅ Employee user - bypassing client association check')
   }
 
   console.log('✅ Project Detail Page: Successfully loaded project', project.name)
+
+  // Determine back link based on user role
+  const backHref = isEmployee
+    ? `/dashboard/employee/clients/${project.client_id}`
+    : '/dashboard/client'
+  const backLabel = isEmployee ? 'Back to Client View' : 'Back to Dashboard'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -101,11 +120,11 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto">
           <Link
-            href="/dashboard/client"
+            href={backHref}
             className="inline-flex items-center text-gray-600 hover:text-gray-900 transition-colors mb-4"
           >
             <ArrowLeft className="w-5 h-5 mr-2" />
-            Back to Dashboard
+            {backLabel}
           </Link>
           <div className="flex items-center space-x-4">
             <h1 className="text-3xl font-bold text-gray-900">{project.name}</h1>
@@ -115,7 +134,17 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
 
       {/* Project Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <ProjectDetailContent project={project} />
+        <Suspense
+          fallback={
+            <div className="space-y-6">
+              <ProjectCardSkeleton />
+              <ProjectCardSkeleton />
+              <ProjectCardSkeleton />
+            </div>
+          }
+        >
+          <ProjectDetailContent project={project} />
+        </Suspense>
       </div>
     </div>
   )
