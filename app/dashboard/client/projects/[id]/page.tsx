@@ -45,14 +45,25 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   }
 
   // 2. Use admin client for ALL queries (bypasses RLS)
-  const supabaseAdmin = createAdminClient()
+  let supabaseAdmin
+  try {
+    supabaseAdmin = createAdminClient()
+  } catch (error) {
+    console.error('❌ Failed to create admin client:', error)
+    throw error // Don't redirect, show error
+  }
 
   // 3. Verify user has access to this project
-  const { data: userData } = (await supabaseAdmin
+  const { data: userData, error: userError } = (await supabaseAdmin
     .from('users')
     .select('role')
     .eq('id', user.id)
-    .single()) as { data: { role: string } | null }
+    .single()) as { data: { role: string } | null; error: Error | null }
+
+  if (userError) {
+    console.error('❌ Failed to fetch user role:', userError)
+    throw new Error(`Database error: ${userError.message}`)
+  }
 
   const isEmployee = userData?.role === 'employee'
 

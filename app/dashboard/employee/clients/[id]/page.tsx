@@ -51,14 +51,25 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
   }
 
   // 2. Use ADMIN CLIENT for ALL data queries (bypasses RLS)
-  const supabaseAdmin = createAdminClient()
+  let supabaseAdmin
+  try {
+    supabaseAdmin = createAdminClient()
+  } catch (error) {
+    console.error('❌ Failed to create admin client:', error)
+    throw error // Don't redirect, let error show
+  }
 
   // Verify user is employee
-  const { data: userData } = (await supabaseAdmin
+  const { data: userData, error: userError } = (await supabaseAdmin
     .from('users')
     .select('email, role')
     .eq('id', user.id)
-    .single()) as { data: { email: string; role: 'client' | 'employee' } | null }
+    .single()) as { data: { email: string; role: 'client' | 'employee' } | null; error: Error | null }
+
+  if (userError) {
+    console.error('❌ Failed to fetch user role:', userError)
+    throw new Error(`Database error: ${userError.message}`) // Don't redirect, show error
+  }
 
   if (!userData || userData.role !== 'employee') {
     redirect('/dashboard/client')
