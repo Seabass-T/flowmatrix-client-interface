@@ -48,6 +48,13 @@ export function EditableProjectCard({
   const [localProject, setLocalProject] = useState(project)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [errorMessage, setErrorMessage] = useState<string>('')
+
+  // Fix hydration: Render date only client-side
+  const [formattedDate, setFormattedDate] = useState<string>('')
+
+  useEffect(() => {
+    setFormattedDate(new Date(localProject.updated_at).toLocaleDateString())
+  }, [localProject.updated_at])
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null)
 
   // Sync local state when project prop changes
@@ -315,7 +322,7 @@ export function EditableProjectCard({
       {/* Last Updated */}
       <div className="mt-4 pt-4 border-t border-gray-200">
         <span className="text-xs text-gray-500">
-          Last Updated: {new Date(localProject.updated_at).toLocaleDateString()}
+          Last Updated: {formattedDate || '...'}
         </span>
       </div>
     </div>
