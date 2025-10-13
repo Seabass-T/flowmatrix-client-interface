@@ -6,6 +6,9 @@ import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { ProjectDetailContent } from '@/components/ProjectDetailContent'
 
+// Force dynamic rendering to prevent caching issues with authentication
+export const dynamic = 'force-dynamic'
+
 /**
  * Project Detail Page
  *
