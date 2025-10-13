@@ -1,5 +1,8 @@
+'use client'
+
 import { formatCurrency, formatHours } from '@/lib/calculations'
 import { ProjectStatus } from '@/types/database'
+import { useState, useEffect } from 'react'
 
 interface ProjectCardProps {
   id: string
@@ -50,6 +53,13 @@ export function ProjectCard({
   lastUpdated,
   onClick,
 }: ProjectCardProps) {
+  // Fix hydration error: Render date only on client-side
+  const [formattedDate, setFormattedDate] = useState<string>('')
+
+  useEffect(() => {
+    setFormattedDate(lastUpdated.toLocaleDateString())
+  }, [lastUpdated])
+
   return (
     <div
       onClick={onClick}
@@ -90,7 +100,7 @@ export function ProjectCard({
       {/* Last Updated with fade effect */}
       <div className="mt-4 pt-4 border-t border-gray-200 group-hover:border-gray-300 transition-colors duration-300">
         <span className="text-xs text-gray-500 group-hover:text-gray-600 transition-colors duration-300">
-          Last Updated: {lastUpdated.toLocaleDateString()}
+          Last Updated: {formattedDate || '...'}
         </span>
       </div>
 
