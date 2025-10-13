@@ -71,7 +71,9 @@ export function ClientCard({
   const handleViewDashboard = () => {
     // Navigate to client dashboard with edit mode enabled (employee access)
     // Sprint 4: Full edit mode implementation (PRD Section 4.3.5)
-    router.push(`/dashboard/employee/clients/${id}`)
+    const targetUrl = `/dashboard/employee/clients/${id}`
+    console.log('🔍 ClientCard: Navigating to', targetUrl, 'for client:', companyName)
+    router.push(targetUrl)
   }
 
   return (
