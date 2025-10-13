@@ -1,16 +1,10 @@
 import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { redirect, notFound } from 'next/navigation'
-import { lazy, Suspense } from 'react'
 import { ProjectWithRelations } from '@/types/database'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
-import { ProjectCardSkeleton } from '@/components/LoadingSkeletons'
-
-// Lazy load the heavy ProjectDetailContent component (contains charts)
-const ProjectDetailContent = lazy(() =>
-  import('@/components/ProjectDetailContent').then((mod) => ({ default: mod.ProjectDetailContent }))
-)
+import { ProjectDetailContent } from '@/components/ProjectDetailContent'
 
 /**
  * Project Detail Page
@@ -93,15 +87,18 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
 
     console.log('🔐 Client user - checking user_clients association:', { userClient, userClientError })
 
-    if (!userClient || userClientError) {
-      console.warn('⚠️ User not associated with any client:', user.id)
+    // Only redirect if there's a real error (not just "no rows" which might mean setup issue)
+    if (userClientError && userClientError.message !== 'PGRST116') {
+      console.error('❌ Error fetching user_clients:', userClientError)
+    }
+
+    // If user has a client association, verify it matches the project
+    if (userClient && project.client_id !== userClient.client_id) {
+      console.warn('⚠️ Unauthorized access attempt: User', user.id, 'tried to access project', id, 'belonging to different client')
       redirect('/dashboard/client')
     }
 
-    if (project.client_id !== userClient.client_id) {
-      console.warn('⚠️ Unauthorized access attempt: User', user.id, 'tried to access project', id)
-      redirect('/dashboard/client')
-    }
+    console.log('✅ Client user access verified for project', id)
   } else {
     console.log('✅ Employee user - bypassing client association check')
   }
@@ -134,17 +131,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
 
       {/* Project Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <Suspense
-          fallback={
-            <div className="space-y-6">
-              <ProjectCardSkeleton />
-              <ProjectCardSkeleton />
-              <ProjectCardSkeleton />
-            </div>
-          }
-        >
-          <ProjectDetailContent project={project} />
-        </Suspense>
+        <ProjectDetailContent project={project} />
       </div>
     </div>
   )
