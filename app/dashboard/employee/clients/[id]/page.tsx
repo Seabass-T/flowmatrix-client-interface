@@ -40,13 +40,23 @@ interface PageProps {
 export default async function EmployeeClientViewPage({ params }: PageProps) {
   const { id: clientId } = await params
 
+  console.log('🔍 [Employee Client View] Loading page for client:', clientId)
+
   // 1. Auth check with regular client
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
 
+  console.log('🔐 [Employee Client View] Auth check:', {
+    hasUser: !!user,
+    userId: user?.id,
+    authError: authError?.message,
+  })
+
   if (!user) {
+    console.error('❌ [Employee Client View] No authenticated user - redirecting to login')
     redirect('/login')
   }
 
@@ -54,13 +64,21 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
   const supabaseAdmin = createAdminClient()
 
   // Verify user is employee
-  const { data: userData } = (await supabaseAdmin
+  const { data: userData, error: userError } = (await supabaseAdmin
     .from('users')
     .select('email, role')
     .eq('id', user.id)
-    .single()) as { data: { email: string; role: 'client' | 'employee' } | null }
+    .single()) as { data: { email: string; role: 'client' | 'employee' } | null; error: Error | null }
+
+  console.log('👤 [Employee Client View] User role check:', {
+    hasUserData: !!userData,
+    role: userData?.role,
+    email: userData?.email,
+    userError: userError?.message,
+  })
 
   if (!userData || userData.role !== 'employee') {
+    console.error('❌ [Employee Client View] User is not employee - redirecting to client dashboard')
     redirect('/dashboard/client')
   }
 
@@ -71,7 +89,14 @@ export default async function EmployeeClientViewPage({ params }: PageProps) {
     .eq('id', clientId)
     .single()) as { data: Client | null; error: Error | null }
 
+  console.log('🏢 [Employee Client View] Client fetch:', {
+    hasClient: !!client,
+    clientName: client?.company_name,
+    clientError: clientError?.message,
+  })
+
   if (clientError || !client) {
+    console.error('❌ [Employee Client View] Client not found - calling notFound()')
     notFound()
   }
 

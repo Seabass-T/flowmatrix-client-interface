@@ -34,17 +34,27 @@ interface ProjectDetailPageProps {
 export default async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const { id } = await params
 
+  console.log('🔍 [Project Detail] Loading page for project:', id)
+
   // 1. Verify authentication
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
 
+  console.log('🔐 [Project Detail] Auth check:', {
+    hasUser: !!user,
+    userId: user?.id,
+    authError: authError?.message,
+  })
+
   if (!user) {
+    console.error('❌ [Project Detail] No authenticated user - redirecting to login')
     redirect('/login')
   }
 
-  console.log('📄 Project Detail Page: Fetching project', id, 'for user', user.id)
+  console.log('📄 [Project Detail] Fetching project', id, 'for user', user.id)
 
   // 2. Use admin client to fetch project with relations (bypasses RLS)
   const supabaseAdmin = createAdminClient()
@@ -62,8 +72,14 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
     .eq('id', id)
     .single()) as { data: ProjectWithRelations | null; error: { message?: string } | null }
 
+  console.log('📦 [Project Detail] Project fetch:', {
+    hasProject: !!project,
+    projectName: project?.name,
+    projectError: projectError?.message,
+  })
+
   if (projectError || !project) {
-    console.error('❌ Error fetching project:', projectError)
+    console.error('❌ [Project Detail] Project not found - calling notFound()')
     notFound()
   }
 
@@ -74,8 +90,14 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
     .eq('id', user.id)
     .single()) as { data: { role: string } | null; error: { message?: string } | null }
 
+  console.log('👤 [Project Detail] User role check:', {
+    hasUserData: !!userData,
+    role: userData?.role,
+    userError: userError?.message,
+  })
+
   const isEmployee = userData && !userError ? userData.role === 'employee' : false
-  console.log('🔐 Project Detail Page: User role check - isEmployee:', isEmployee, 'userId:', user.id)
+  console.log('🔐 [Project Detail] Access check - isEmployee:', isEmployee, 'userId:', user.id)
 
   // If not employee, verify client association
   if (!isEmployee) {
@@ -85,25 +107,30 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       .eq('user_id', user.id)
       .single()) as { data: { client_id: string } | null; error: { message?: string } | null }
 
-    console.log('🔐 Client user - checking user_clients association:', { userClient, userClientError })
+    console.log('🔐 [Project Detail] Client user - checking user_clients association:', {
+      hasUserClient: !!userClient,
+      userClientId: userClient?.client_id,
+      projectClientId: project.client_id,
+      userClientError: userClientError?.message,
+    })
 
     // Only redirect if there's a real error (not just "no rows" which might mean setup issue)
     if (userClientError && userClientError.message !== 'PGRST116') {
-      console.error('❌ Error fetching user_clients:', userClientError)
+      console.error('❌ [Project Detail] Error fetching user_clients:', userClientError)
     }
 
     // If user has a client association, verify it matches the project
     if (userClient && project.client_id !== userClient.client_id) {
-      console.warn('⚠️ Unauthorized access attempt: User', user.id, 'tried to access project', id, 'belonging to different client')
+      console.error('❌ [Project Detail] Unauthorized access - User', user.id, 'tried to access project', id, 'belonging to different client')
       redirect('/dashboard/client')
     }
 
-    console.log('✅ Client user access verified for project', id)
+    console.log('✅ [Project Detail] Client user access verified for project', id)
   } else {
-    console.log('✅ Employee user - bypassing client association check')
+    console.log('✅ [Project Detail] Employee user - bypassing client association check')
   }
 
-  console.log('✅ Project Detail Page: Successfully loaded project', project.name)
+  console.log('✅ [Project Detail] Successfully loaded project', project.name)
 
   // Determine back link based on user role
   const backHref = isEmployee
