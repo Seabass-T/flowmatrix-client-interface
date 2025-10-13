@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, memo, useMemo, useCallback } from 'react'
+import { useState, useEffect, memo, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { ProjectCard } from './ProjectCard'
 import { EditableProjectCard } from './EditableProjectCard'
@@ -41,9 +41,9 @@ function ProjectCardListComponent({ projects, timeRange, isEditMode = false, bas
   const [localProjects, setLocalProjects] = useState(projects)
 
   // Update local projects when props change
-  useState(() => {
+  useEffect(() => {
     setLocalProjects(projects)
-  })
+  }, [projects])
 
   // Memoize click handler
   const handleProjectClick = useCallback((project: Project) => {
