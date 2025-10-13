@@ -39,6 +39,12 @@ interface ProjectCardListProps {
 function ProjectCardListComponent({ projects, timeRange, isEditMode = false, basePath = '/dashboard/client/projects' }: ProjectCardListProps) {
   const router = useRouter()
   const [localProjects, setLocalProjects] = useState(projects)
+  // Fix hydration: Use client-side timestamp only
+  const [clientTimestamp, setClientTimestamp] = useState<number>(0)
+
+  useEffect(() => {
+    setClientTimestamp(Date.now())
+  }, [])
 
   // Update local projects when props change
   useEffect(() => {
@@ -90,11 +96,12 @@ function ProjectCardListComponent({ projects, timeRange, isEditMode = false, bas
         hoursSavedPerDay = hoursSaved / 30
       } else {
         // For 'all' time, calculate average per day
-        if (project.go_live_date) {
+        if (project.go_live_date && clientTimestamp > 0) {
+          // Use client timestamp to avoid hydration mismatch
           const daysActive = Math.max(
             1,
             Math.floor(
-              (Date.now() - new Date(project.go_live_date).getTime()) /
+              (clientTimestamp - new Date(project.go_live_date).getTime()) /
                 (1000 * 60 * 60 * 24)
             )
           )
@@ -109,7 +116,7 @@ function ProjectCardListComponent({ projects, timeRange, isEditMode = false, bas
         totalCost,
       }
     })
-  }, [localProjects, timeRange])
+  }, [localProjects, timeRange, clientTimestamp])
 
   // Show empty state if no projects
   if (localProjects.length === 0) {
