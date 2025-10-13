@@ -2491,6 +2491,7 @@ XL: 'p-12'   // 48px
 - ❌ Using client components unnecessarily
 - ❌ **Using ANON_KEY for data queries in Server Components/layouts** ⚠️ **CAUSES INFINITE REDIRECTS**
 - ❌ **Querying database in layouts without admin client** ⚠️ **CAUSES INFINITE REDIRECTS**
+- ❌ **Using catch-all rewrites in `vercel.json`** ⚠️ **BREAKS ALL ROUTING IN PRODUCTION** (see Section 12)
 - ❌ **Using modals for complex detail views** ⚠️ **USE PAGE ROUTES INSTEAD** (see Section 6)
 - ❌ **Spending >2 hours debugging modal rendering issues** ⚠️ **SWITCH TO PAGE ROUTE**
 - ❌ **Creating cross-role routes (e.g., employees accessing `/dashboard/client/*`)** ⚠️ **CAUSES MIDDLEWARE REDIRECTS**
@@ -2551,6 +2552,195 @@ if (isClientDashboard && userRole !== 'client') {
 - [ ] Tested in multiple browsers
 - [ ] No console errors
 - [ ] Code follows patterns in this doc
+
+---
+
+## 12. Critical Debugging Lesson: Production-Only Routing Issues
+
+### The Problem: Mysterious 307 Redirect Loops in Production
+
+**Symptoms:**
+- ✅ Works perfectly in development (`pnpm dev`)
+- ❌ Breaks completely in production (Vercel deployment)
+- 307 Temporary Redirect loops
+- React Error #418 (hydration mismatch) in console
+- `x-matched-path: /` header for ALL routes (smoking gun!)
+- `x-nextjs-prerender: 1` header present
+
+**Initial Misdiagnoses (ALL WRONG):**
+1. ❌ Thought it was a date formatting hydration issue → Added `formatDate()` utilities with UTC timezone
+2. ❌ Thought it was static prerendering caching → Added `export const dynamic = 'force-dynamic'`
+3. ❌ Thought it was middleware authentication timing → Reviewed auth flow
+
+**Time Wasted:** 3+ hours chasing red herrings
+
+### The Root Cause: Vercel Catch-All Rewrite
+
+**Location:** `vercel.json`
+
+**The Problem Code:**
+```json
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
+  ]
+}
+```
+
+**What This Does:**
+- Vercel processes this BEFORE Next.js routing
+- ALL URLs get rewritten to `/` (homepage)
+- Next.js never sees the original URL
+- Middleware redirects based on homepage logic
+- Creates infinite redirect loop
+
+**Why It Only Broke Production:**
+- `vercel.json` is Vercel-specific (doesn't affect localhost)
+- Development server ignores Vercel configuration
+- Only activates when deployed to Vercel
+
+### The Solution: Remove Catch-All Rewrites
+
+**Fixed `vercel.json`:**
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm build",
+  "devCommand": "pnpm dev",
+  "installCommand": "pnpm install",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "functions": {
+    "app/api/**/*.ts": {
+      "maxDuration": 10
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Result:** ✅ All routing works perfectly
+
+### Debugging Methodology That Finally Worked
+
+1. **User reported:** "Same error" multiple times → Confirmed initial fixes didn't work
+2. **User provided:** Detailed network logs with headers
+3. **Key insight:** `x-matched-path: /` for project detail routes
+4. **Critical question:** "Does it work in development?" → User: "Yes, perfectly"
+5. **Realization:** It's an environment-specific configuration issue
+6. **Checked:** `vercel.json` for Vercel-specific settings
+7. **Found:** Catch-all rewrite redirecting everything to `/`
+8. **Removed:** The rewrites section entirely
+9. **Success:** User confirmed fix worked
+
+### Key Learnings for Future Debugging
+
+**When Dev Works But Production Fails:**
+1. Check environment-specific configuration files:
+   - `vercel.json` (Vercel)
+   - `netlify.toml` (Netlify)
+   - `amplify.yml` (AWS Amplify)
+   - Platform-specific settings in dashboard
+
+2. Look for environment-only features:
+   - Rewrites/redirects
+   - Edge functions/middleware
+   - Header modifications
+   - CDN caching rules
+
+3. Check response headers for clues:
+   - `x-matched-path` (shows what route Vercel thinks it matched)
+   - `x-vercel-cache` (shows cache status)
+   - `x-nextjs-prerender` (shows if page was prerendered)
+   - Custom platform headers
+
+4. Don't assume it's your code:
+   - If dev works perfectly, suspect configuration
+   - Check deployment platform docs
+   - Review recent config changes
+
+### Vercel Configuration Best Practices
+
+**✅ DO:**
+- Use Next.js native routing (no rewrites needed)
+- Set specific API route configurations in `functions` section
+- Add security headers in `headers` section
+- Specify regions for optimization
+- Use framework detection (`"framework": "nextjs"`)
+
+**❌ DON'T:**
+- Use catch-all rewrites like `"source": "/(.*)"`
+- Override Next.js routing with Vercel rewrites
+- Add rewrites for routes Next.js already handles
+- Use `_redirects` file (Next.js has `next.config.ts` redirects)
+
+**When You DO Need Rewrites:**
+- Proxy requests to external APIs
+- Migrate from old URL structure (legacy routes)
+- Redirect specific old paths to new ones
+
+**Example of Legitimate Rewrite:**
+```json
+{
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://api.example.com/:path*"
+    },
+    {
+      "source": "/old-blog/:slug",
+      "destination": "/blog/:slug"
+    }
+  ]
+}
+```
+
+### Network Debugging Pattern
+
+**If you see redirect loops, check:**
+1. Open DevTools Network tab
+2. Filter for "All" or "Doc" (documents)
+3. Look at the request chain
+4. Check response headers for each redirect
+5. Identify the pattern:
+   - Where does it start?
+   - Where does it loop back?
+   - What headers are present?
+
+**Red Flags:**
+- `x-matched-path: /` for non-root routes
+- 307 redirects in a loop (A → B → A → B)
+- Same URL appearing multiple times
+- Middleware logs not matching expected routes
+
+### Testing Production Issues Locally
+
+**Vercel CLI Preview:**
+```bash
+# Install Vercel CLI
+pnpm i -g vercel
+
+# Run production build locally
+vercel dev --prod
+
+# Deploy to preview
+vercel --prod=false
+```
+
+This simulates the production environment including `vercel.json` configuration.
 
 ---
 
