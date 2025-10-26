@@ -6,7 +6,7 @@ export function calculateTotalHoursSaved(
   hoursSavedWeekly?: number,
   hoursSavedMonthly?: number,
   goLiveDate?: Date,
-  timeRange: 'day' | 'week' | 'month' | 'all' = 'all'
+  timeRange: 'day' | 'week' | 'month' | 'quarter' | 'all' = 'all'
 ): number {
   if (!goLiveDate) return 0;
 
@@ -32,6 +32,9 @@ export function calculateTotalHoursSaved(
       break;
     case 'month':
       totalHours = hoursPerDay * Math.min(30, daysActive);
+      break;
+    case 'quarter':
+      totalHours = hoursPerDay * Math.min(90, daysActive);
       break;
     case 'all':
       totalHours = hoursPerDay * daysActive;

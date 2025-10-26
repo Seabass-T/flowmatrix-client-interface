@@ -2467,6 +2467,45 @@ XL: 'p-12'   // 48px
     - Field-level error feedback
     - Proper HTTP status codes (401, 403, 404, 500)
 
+**Sprint 7: Demo Experience** ✅ **COMPLETED** - Public showcase with realistic Construction ICP data:
+  - **Routes:**
+    - `/demo` - Main demo dashboard (public, no authentication)
+    - `/demo/projects/[id]` - Demo project detail pages
+  - **Features:**
+    - 8 automation projects for fictional "Apex Construction Inc."
+    - 7 active systems, 1 in development
+    - Total investment: ~$135,500 (realistic pricing)
+    - Monthly ROI: ~$44,700 from active projects
+    - Time saved: ~167 hours/week
+    - Time range filtering (7 Days, Month, Quarter, All Time)
+    - Dark green branding theme (#10B981)
+    - Prominent CTAs to FlowMatrix AI intake form
+    - "Return to website" link to flowmatrixai.com
+  - **Technical Implementation:**
+    - In-memory mock data (`lib/demo-data.ts`)
+    - Isolated route structure (`/app/demo/`)
+    - Custom layout with demo branding (`app/demo/layout.tsx`)
+    - Reuses production components (ProjectCardList, MetricCard, ProjectDetailContent)
+    - No database queries (all mock data)
+    - Middleware public route exception
+  - **Key Fixes:**
+    - TimeRangeFilter uses `usePathname()` to maintain correct route
+    - Total Costs metric is time-range specific (not always all-time)
+    - ROI Trend chart shows Total ROI vs Total Costs (line chart with 2 lines)
+    - Maintenance costs = $0 for non-active projects
+    - Quarter timeRange properly supported (90 days)
+  - **Components:**
+    - `/app/demo/page.tsx` - Main dashboard
+    - `/app/demo/layout.tsx` - Demo layout with green theme
+    - `/app/demo/projects/[id]/page.tsx` - Project details
+    - `/lib/demo-data.ts` - Mock data (8 projects, tasks, notes, client)
+  - **Files Modified:**
+    - `middleware.ts` - Added `/demo` as public route
+    - `lib/calculations.ts` - Added 'quarter' timeRange support
+    - `components/TimeRangeFilter.tsx` - Fixed navigation to use pathname
+    - `components/ProjectDetailContent.tsx` - Updated ROI Trend to show ROI vs Costs with time-range specific metrics
+    - `app/demo/page.tsx` - Time-range specific Total Costs calculation
+
 ### 📋 Pending (Future Sprints)
 - File upload/management functionality
 - Payment processing (Stripe integration)

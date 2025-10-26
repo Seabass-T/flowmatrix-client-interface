@@ -90,6 +90,40 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
       goLiveDate || undefined
     )
 
+    // Calculate time-range specific metrics
+    let rangeHoursSaved = 0
+    let rangeROI = 0
+    let rangeCosts = 0
+    const oneTimeCosts = (project.dev_cost || 0) + (project.implementation_cost || 0)
+    const weeklyMaintenance = (project.monthly_maintenance || 0) / 4
+
+    switch (timeRange) {
+      case '7days':
+        rangeHoursSaved = hoursPerDay * 7
+        rangeROI = weeklyROI
+        rangeCosts = oneTimeCosts + weeklyMaintenance
+        break
+      case 'month':
+        rangeHoursSaved = hoursPerDay * 30
+        rangeROI = monthlyROI
+        rangeCosts = oneTimeCosts + (weeklyMaintenance * 4)
+        break
+      case 'quarter':
+        rangeHoursSaved = hoursPerDay * 90
+        rangeROI = dailyROI * 90
+        rangeCosts = oneTimeCosts + (weeklyMaintenance * 13)
+        break
+      case 'all':
+        rangeHoursSaved = totalHoursSaved
+        rangeROI = totalROI
+        rangeCosts = totalCost
+        break
+      default:
+        rangeHoursSaved = totalHoursSaved
+        rangeROI = totalROI
+        rangeCosts = totalCost
+    }
+
     return {
       goLiveDate,
       daysActive,
@@ -101,8 +135,12 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
       totalHoursSaved,
       totalROI,
       totalCost,
+      rangeHoursSaved,
+      rangeROI,
+      rangeCosts,
     }
   }, [
+    timeRange,
     project.go_live_date,
     project.hours_saved_daily,
     project.hours_saved_weekly,
@@ -134,14 +172,43 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
     return data
   }, [timeRange, metrics.daysActive, metrics.goLiveDate, metrics.hoursPerDay, metrics.dailyROI])
 
-  // Memoize weekly ROI data
-  const weeklyROIData = useMemo(() => {
-    const weeks = Math.min(metrics.weeksActive, 12)
-    return Array.from({ length: weeks }, (_, i) => ({
-      week: `Week ${i + 1}`,
-      roi: metrics.weeklyROI,
-    }))
-  }, [metrics.weeksActive, metrics.weeklyROI])
+  // Memoize Total ROI and Total Costs over time
+  const roiVsCostsData = useMemo(() => {
+    // Calculate number of weeks based on time range
+    let weeks = 0
+    switch (timeRange) {
+      case '7days':
+        weeks = 1
+        break
+      case 'month':
+        weeks = 4
+        break
+      case 'quarter':
+        weeks = 13
+        break
+      case 'all':
+        weeks = metrics.weeksActive
+        break
+      default:
+        weeks = metrics.weeksActive
+    }
+
+    const weeklyMaintenance = (project.monthly_maintenance || 0) / 4
+    const oneTimeCosts = (project.dev_cost || 0) + (project.implementation_cost || 0)
+
+    return Array.from({ length: weeks }, (_, i) => {
+      const weekNumber = i + 1
+      const cumulativeROI = metrics.weeklyROI * weekNumber
+      const cumulativeMaintenanceCost = weeklyMaintenance * weekNumber
+      const totalCosts = oneTimeCosts + cumulativeMaintenanceCost
+
+      return {
+        week: `Week ${weekNumber}`,
+        totalROI: Math.round(cumulativeROI),
+        totalCosts: Math.round(totalCosts),
+      }
+    })
+  }, [timeRange, metrics.weeksActive, metrics.weeklyROI, project.monthly_maintenance, project.dev_cost, project.implementation_cost])
 
   // Memoize sorted notes
   const sortedNotes = useMemo(
@@ -230,16 +297,32 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
           <div className="bg-gray-50 rounded-lg p-4">
             <h4 className="text-sm font-semibold text-gray-700 mb-3">ROI Trend</h4>
             <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={weeklyROIData}>
+              <LineChart data={roiVsCostsData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="week" tick={{ fontSize: 12 }} stroke="#6b7280" />
                 <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px' }}
+                  formatter={(value: number) => `$${value.toLocaleString()}`}
                 />
                 <Legend />
-                <Bar dataKey="roi" fill="#0D9488" name="Weekly ROI ($)" />
-              </BarChart>
+                <Line
+                  type="monotone"
+                  dataKey="totalROI"
+                  stroke="#10B981"
+                  strokeWidth={2}
+                  name="Total ROI ($)"
+                  dot={{ fill: '#10B981' }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="totalCosts"
+                  stroke="#EF4444"
+                  strokeWidth={2}
+                  name="Total Costs ($)"
+                  dot={{ fill: '#EF4444' }}
+                />
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -258,20 +341,20 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
             <p className="text-lg font-bold text-gray-900">{formatCurrency(project.employee_wage || 0)}/hr</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Daily ROI:</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.dailyROI)}</p>
+            <p className="text-sm text-gray-600">Total Hours Saved:</p>
+            <p className="text-lg font-bold text-gray-900">{formatHours(metrics.rangeHoursSaved)}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Weekly ROI:</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.weeklyROI)}</p>
+            <p className="text-sm text-gray-600">Total ROI:</p>
+            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.rangeROI)}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Monthly ROI:</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.monthlyROI)}</p>
+            <p className="text-sm text-gray-600">Total Costs:</p>
+            <p className="text-lg font-bold text-red-600">{formatCurrency(metrics.rangeCosts)}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Total ROI ({metrics.weeksActive} weeks):</p>
-            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.totalROI)}</p>
+            <p className="text-sm text-gray-600">Net Profit:</p>
+            <p className="text-lg font-bold text-green-600">{formatCurrency(metrics.rangeROI - metrics.rangeCosts)}</p>
           </div>
         </div>
       </section>
@@ -299,9 +382,9 @@ function ProjectDetailContentComponent({ project }: ProjectDetailContentProps) {
             </p>
           </div>
           <div>
-            <p className="text-sm text-gray-600">Total Cost to Date:</p>
+            <p className="text-sm text-gray-600">Total Cost (selected period):</p>
             <p className="text-lg font-bold text-gray-900">
-              {metrics.totalCost === 0 ? 'Free' : formatCurrency(metrics.totalCost)}
+              {metrics.rangeCosts === 0 ? 'Free' : formatCurrency(metrics.rangeCosts)}
             </p>
           </div>
         </div>

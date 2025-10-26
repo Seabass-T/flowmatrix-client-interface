@@ -61,7 +61,8 @@ export async function middleware(request: NextRequest) {
   // Define route patterns
   const isAuthRoute = pathname === '/login' || pathname === '/signup'
   const isAuthCallback = pathname.startsWith('/api/auth')
-  const isPublicRoute = pathname === '/' || isAuthRoute || isAuthCallback
+  const isDemoRoute = pathname.startsWith('/demo')
+  const isPublicRoute = pathname === '/' || isAuthRoute || isAuthCallback || isDemoRoute
 
   const isClientDashboard = pathname.startsWith('/dashboard/client')
   const isEmployeeDashboard = pathname.startsWith('/dashboard/employee')
@@ -69,8 +70,8 @@ export async function middleware(request: NextRequest) {
 
   // 1. No user/authentication error - handle appropriately
   if (!user || authError) {
-    // Allow access to auth routes and callbacks
-    if (isAuthRoute || isAuthCallback) {
+    // Allow access to public routes (auth, callbacks, demo)
+    if (isPublicRoute) {
       return supabaseResponse
     }
 

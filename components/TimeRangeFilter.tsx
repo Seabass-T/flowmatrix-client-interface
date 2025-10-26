@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 
 /**
  * TimeRangeFilter Component
@@ -38,6 +38,7 @@ interface TimeRangeFilterProps {
 export function TimeRangeFilter({ currentRange }: TimeRangeFilterProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const pathname = usePathname()
 
   const handleRangeChange = (newRange: TimeRange) => {
     // Create new search params
@@ -50,8 +51,8 @@ export function TimeRangeFilter({ currentRange }: TimeRangeFilterProps) {
       params.set('timeRange', newRange)
     }
 
-    // Navigate to new URL with updated params
-    const newUrl = params.toString() ? `?${params.toString()}` : '/dashboard/client'
+    // Navigate to new URL with updated params (maintain current path)
+    const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname
     router.replace(newUrl)
   }
 
